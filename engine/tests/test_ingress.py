@@ -115,3 +115,26 @@ def test_ingress_job_imports_only_selected_ready_candidates(tmp_path):
     raw_files = list((tmp_path / "vault" / "raw").iterdir())
     assert len(raw_files) == 1
     assert raw_files[0].read_bytes() == first.read_bytes()
+
+
+def test_ingress_job_imports_cached_social_poster_candidate(tmp_path):
+    poster = tmp_path / "poster.jpg"
+    Image.new("RGB", (32, 48), color=(120, 60, 20)).save(poster)
+    service = IngressService(tmp_path / "vault")
+    candidate = IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator="https://www.instagram.com/reel/example/#poster",
+        display_name="example reel poster",
+        media_type=MediaType.IMAGE,
+        thumbnail_path=poster,
+        selected=True,
+        metadata_json={"local_import_path": str(poster), "asset_role": "video_poster"},
+    )
+    service._write_candidates({candidate.id: candidate})
+
+    job = service.create_job(SourceKind.INSTAGRAM, [candidate.id])
+    completed = service.process_job(job.id)
+
+    assert completed.status == IngressJobStatus.COMPLETE
+    assert completed.imported_count == 1
+    assert completed.imported_media_items[0].metadata_json["original_path"] == str(poster)

@@ -86,20 +86,21 @@ class IngressService:
             for candidate_id in job.candidate_ids
             if candidate_id in candidates
         ]
-        ready_local_paths = [
-            Path(candidate.source_locator)
+        ready_import_paths = [
+            import_path
             for candidate in selected_candidates
-            if candidate.source_kind == SourceKind.LOCAL
-            and candidate.status == IngressCandidateStatus.READY
+            if candidate.status == IngressCandidateStatus.READY
+            for import_path in [self._import_path_for_candidate(candidate)]
+            if import_path is not None
         ]
         rejected_candidates = [
             candidate
             for candidate in selected_candidates
-            if candidate.source_kind != SourceKind.LOCAL
-            or candidate.status != IngressCandidateStatus.READY
+            if candidate.status != IngressCandidateStatus.READY
+            or self._import_path_for_candidate(candidate) is None
         ]
 
-        import_result = VaultService(self.vault_root).import_local_paths(ready_local_paths)
+        import_result = VaultService(self.vault_root).import_local_paths(ready_import_paths)
         missing_ids = [
             candidate_id for candidate_id in job.candidate_ids if candidate_id not in candidates
         ]
@@ -154,6 +155,15 @@ class IngressService:
 
     def get_job(self, job_id: str) -> IngressJob | None:
         return self._read_jobs().get(job_id)
+
+    def _import_path_for_candidate(self, candidate: IngressCandidate) -> Path | None:
+        if candidate.source_kind == SourceKind.LOCAL:
+            return Path(candidate.source_locator)
+
+        local_import_path = candidate.metadata_json.get("local_import_path")
+        if isinstance(local_import_path, str) and local_import_path:
+            return Path(local_import_path)
+        return None
 
     def _expand_root(self, root: Path, *, recursive: bool) -> list[Path]:
         if root.is_file():
