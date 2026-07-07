@@ -88,6 +88,32 @@ The **Data Ingress** tab uses scan -> review -> confirm.
 
 The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies only selected ready candidates.
 
+## Instagram Helper Fixture
+
+The first Instagram ingress path accepts a browser-extension Session Helper payload. In development, paste fixture JSON into **Instagram Source** -> **Instagram helper payload**.
+
+Example:
+
+```json
+{
+  "helper_version": "fixture",
+  "media": [
+    {
+      "id": "ig_video_1",
+      "source_url": "https://www.instagram.com/reel/example/",
+      "display_name": "example reel",
+      "media_type": "video",
+      "poster_path": "/absolute/path/to/poster.jpg",
+      "width": 1080,
+      "height": 1920,
+      "duration": 9.5
+    }
+  ]
+}
+```
+
+The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The fixture path creates a video preview candidate and a selectable poster image candidate. Full Instagram original downloading remains behind the future browser-extension helper.
+
 ## Legacy Direct Import API
 
 The engine still exposes `/vault/import/local` for direct tests and compatibility, but the product UI should use the ingress scan/job flow.
