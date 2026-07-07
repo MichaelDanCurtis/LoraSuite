@@ -1,2 +1,15 @@
 .superpowers/
+node_modules/
+dist/
+.vite/
+*.log
 
+engine/.venv/
+engine/.pytest_cache/
+engine/**/__pycache__/
+*.pyc
+
+src-tauri/target/
+.DS_Store
+.lorasuite/
+.serena/

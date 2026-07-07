@@ -1,0 +1,25 @@
+[project]
+name = "lorasuite-engine"
+version = "0.1.0"
+description = "Local media engine for LoraSuite"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "pillow>=10.0",
+  "pydantic>=2.8",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.2",
+]
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
