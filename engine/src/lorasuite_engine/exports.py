@@ -4,11 +4,14 @@ from pathlib import Path
 from tempfile import mkdtemp
 from uuid import uuid4
 
+from PIL import UnidentifiedImageError
+
 from lorasuite_engine.models import ExportPackage, ExportType
-from lorasuite_engine.vault import sha256_file
+from lorasuite_engine.vault import image_dimensions, sha256_file
 
 
 ALLOWED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
+CREATED_BY = "LoraSuite"
 
 
 def create_runcomfy_image_export(
@@ -21,8 +24,7 @@ def create_runcomfy_image_export(
     _validate_frame_paths(frame_paths)
 
     output_path = Path(output_dir)
-    if output_path.exists() and not output_path.is_dir():
-        raise ValueError(f"output_dir exists and is not a directory: {output_path}")
+    _validate_output_dir(output_path)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     staged_path = Path(
@@ -67,6 +69,7 @@ def create_runcomfy_image_export(
             status="complete",
         )
         manifest = {
+            "created_by": CREATED_BY,
             "export_id": package.id,
             "export_type": package.export_type.value,
             "status": package.status,
@@ -94,6 +97,9 @@ def create_runcomfy_image_export(
 
 
 def _validate_frame_paths(frames: list[Path]) -> None:
+    if not frames:
+        raise ValueError("At least one frame is required for RunComfy image export")
+
     seen_frames: set[Path] = set()
     for frame in frames:
         suffix = frame.suffix.lower()
@@ -110,6 +116,43 @@ def _validate_frame_paths(frames: list[Path]) -> None:
         if frame_identity in seen_frames:
             raise ValueError(f"Duplicate frame path: {frame}")
         seen_frames.add(frame_identity)
+
+        try:
+            image_dimensions(frame)
+        except (OSError, UnidentifiedImageError, ValueError) as exc:
+            raise ValueError(f"Frame image could not be read: {frame}") from exc
+
+
+def _validate_output_dir(output_path: Path) -> None:
+    if output_path.exists() and not output_path.is_dir():
+        raise ValueError(f"output_dir exists and is not a directory: {output_path}")
+    if not output_path.exists() or _directory_is_empty(output_path):
+        return
+    if _is_lorasuite_runcomfy_export(output_path):
+        return
+    raise ValueError(
+        f"output_dir is non-empty and is not a LoraSuite RunComfy export: {output_path}"
+    )
+
+
+def _directory_is_empty(path: Path) -> bool:
+    return next(path.iterdir(), None) is None
+
+
+def _is_lorasuite_runcomfy_export(path: Path) -> bool:
+    manifest_path = path / "manifest.json"
+    if not manifest_path.is_file():
+        return False
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    return (
+        manifest.get("created_by") == CREATED_BY
+        and manifest.get("export_type") == ExportType.RUNCOMFY_IMAGE.value
+    )
 
 
 def _replace_directory(staged_path: Path, output_path: Path) -> None:

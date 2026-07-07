@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from lorasuite_engine.exports import create_runcomfy_image_export
@@ -42,12 +42,15 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
 
     @app.post("/exports/runcomfy-image")
     def export_runcomfy_image(request: RunComfyImageExportRequest) -> dict[str, object]:
-        package = create_runcomfy_image_export(
-            frames=request.frames,
-            output_dir=request.output_dir,
-            caption_template=request.caption_template,
-            source_segment_ids=request.source_segment_ids,
-        )
+        try:
+            package = create_runcomfy_image_export(
+                frames=request.frames,
+                output_dir=request.output_dir,
+                caption_template=request.caption_template,
+                source_segment_ids=request.source_segment_ids,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return package.model_dump(mode="json")
 
     return app

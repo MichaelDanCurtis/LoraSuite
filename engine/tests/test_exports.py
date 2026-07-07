@@ -46,6 +46,7 @@ def test_runcomfy_export_writes_images_captions_manifest_and_report(tmp_path):
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest == {
+        "created_by": "LoraSuite",
         "export_id": package.id,
         "export_type": "runcomfy_image",
         "status": "complete",
@@ -76,6 +77,16 @@ def test_runcomfy_export_rejects_webp(tmp_path):
         )
 
 
+def test_runcomfy_export_rejects_empty_frame_list(tmp_path):
+    with pytest.raises(ValueError, match="At least one frame is required"):
+        create_runcomfy_image_export(
+            frames=[],
+            output_dir=tmp_path / "export",
+            caption_template="caption",
+            source_segment_ids=[],
+        )
+
+
 def test_runcomfy_export_rejects_unsupported_suffix(tmp_path):
     unsupported = tmp_path / "frame.gif"
     unsupported.write_bytes(b"fake")
@@ -95,6 +106,23 @@ def test_runcomfy_export_rejects_missing_frame_without_complete_manifest(tmp_pat
     with pytest.raises(ValueError, match="Frame does not exist"):
         create_runcomfy_image_export(
             frames=[tmp_path / "missing.png"],
+            output_dir=output_dir,
+            caption_template="caption",
+            source_segment_ids=["segment-1"],
+        )
+
+    assert not (output_dir / "manifest.json").exists()
+    assert not (output_dir / "export_report.md").exists()
+
+
+def test_runcomfy_export_rejects_corrupt_image_without_complete_manifest(tmp_path):
+    corrupt_frame = tmp_path / "corrupt.png"
+    corrupt_frame.write_bytes(b"not a png")
+    output_dir = tmp_path / "export"
+
+    with pytest.raises(ValueError, match="Frame image could not be read"):
+        create_runcomfy_image_export(
+            frames=[corrupt_frame],
             output_dir=output_dir,
             caption_template="caption",
             source_segment_ids=["segment-1"],
@@ -136,3 +164,60 @@ def test_failed_runcomfy_export_removes_staged_output(tmp_path, monkeypatch):
 
     assert not output_dir.exists()
     assert not list(tmp_path.glob(".export.staging.*"))
+
+
+def test_runcomfy_export_rejects_unrelated_existing_directory_and_preserves_contents(
+    tmp_path,
+):
+    frame = create_frame(tmp_path / "frame.png")
+    output_dir = tmp_path / "export"
+    output_dir.mkdir()
+    unrelated_file = output_dir / "notes.txt"
+    unrelated_file.write_text("do not delete", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="output_dir is non-empty"):
+        create_runcomfy_image_export(
+            frames=[frame],
+            output_dir=output_dir,
+            caption_template="caption",
+            source_segment_ids=[],
+        )
+
+    assert unrelated_file.read_text(encoding="utf-8") == "do not delete"
+    assert not (output_dir / "manifest.json").exists()
+    assert not list(tmp_path.glob(".export.staging.*"))
+
+
+def test_runcomfy_export_replaces_prior_lorasuite_runcomfy_export(tmp_path):
+    first_frame = create_frame(tmp_path / "first.png", color=(1, 2, 3))
+    second_frame = create_frame(tmp_path / "second.png", color=(4, 5, 6))
+    output_dir = tmp_path / "export"
+
+    first_package = create_runcomfy_image_export(
+        frames=[first_frame],
+        output_dir=output_dir,
+        caption_template="first caption",
+        source_segment_ids=["segment-1"],
+    )
+    stale_file = output_dir / "images" / "stale.txt"
+    stale_file.write_text("stale", encoding="utf-8")
+
+    second_package = create_runcomfy_image_export(
+        frames=[second_frame],
+        output_dir=output_dir,
+        caption_template="second caption",
+        source_segment_ids=["segment-2"],
+    )
+
+    assert second_package.id != first_package.id
+    assert not stale_file.exists()
+    assert (output_dir / "images" / "000001.png").read_bytes() == (
+        second_frame.read_bytes()
+    )
+    assert (output_dir / "images" / "000001.txt").read_text(
+        encoding="utf-8"
+    ) == "second caption\n"
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["created_by"] == "LoraSuite"
+    assert manifest["export_type"] == "runcomfy_image"
+    assert manifest["source_segment_ids"] == ["segment-2"]

@@ -92,3 +92,36 @@ def test_runcomfy_export_endpoint(client, tmp_path):
     assert (output_dir / "images" / "000001.txt").read_text(
         encoding="utf-8"
     ) == "person trigger_token\n"
+
+
+def test_runcomfy_export_endpoint_returns_400_for_webp(client, tmp_path):
+    webp = tmp_path / "frame.webp"
+    webp.write_bytes(b"fake")
+
+    response = client.post(
+        "/exports/runcomfy-image",
+        json={
+            "frames": [str(webp)],
+            "output_dir": str(tmp_path / "export"),
+            "caption_template": "person trigger_token",
+            "source_segment_ids": [],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "WebP is not supported" in response.json()["detail"]
+
+
+def test_runcomfy_export_endpoint_returns_400_for_empty_frames(client, tmp_path):
+    response = client.post(
+        "/exports/runcomfy-image",
+        json={
+            "frames": [],
+            "output_dir": str(tmp_path / "export"),
+            "caption_template": "person trigger_token",
+            "source_segment_ids": [],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "At least one frame is required" in response.json()["detail"]
