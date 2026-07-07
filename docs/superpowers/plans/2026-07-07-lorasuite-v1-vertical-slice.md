@@ -355,17 +355,30 @@ from lorasuite_engine.api import create_app
 @pytest.fixture()
 def client(tmp_path):
     app = create_app(vault_root=tmp_path / "vault")
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 ```
 
 Create `engine/tests/test_api.py`:
 
 ```python
+from lorasuite_engine.api import create_app
+
+
 def test_health_endpoint_reports_ok(client):
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "lorasuite-engine"}
+
+
+def test_create_app_uses_env_vault_root(monkeypatch, tmp_path):
+    vault_root = tmp_path / "env-vault"
+    monkeypatch.setenv("LORASUITE_VAULT_ROOT", str(vault_root))
+
+    app = create_app()
+
+    assert app.state.vault_root == vault_root
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -373,7 +386,7 @@ def test_health_endpoint_reports_ok(client):
 Run:
 
 ```bash
-engine/.venv/bin/python -m pytest engine/tests/test_api.py::test_health_endpoint_reports_ok -q
+engine/.venv/bin/python -m pytest engine/tests/test_api.py -q
 ```
 
 Expected:
@@ -395,14 +408,23 @@ __version__ = "0.1.0"
 Create `engine/src/lorasuite_engine/api.py`:
 
 ```python
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
 
 
+def default_vault_root() -> Path:
+    configured_root = os.environ.get("LORASUITE_VAULT_ROOT")
+    if configured_root:
+        return Path(configured_root)
+
+    return Path.home() / ".lorasuite" / "vault"
+
+
 def create_app(vault_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="LoraSuite Engine")
-    app.state.vault_root = vault_root or Path(".lorasuite/vault")
+    app.state.vault_root = vault_root or default_vault_root()
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -430,7 +452,7 @@ engine/.venv/bin/python -m pytest engine/tests/test_api.py::test_health_endpoint
 Expected:
 
 ```text
-1 passed
+2 passed
 ```
 
 - [ ] **Step 5: Commit health API**
@@ -884,6 +906,7 @@ def test_import_local_endpoint_returns_media_items(client, tmp_path):
 Update `engine/src/lorasuite_engine/api.py`:
 
 ```python
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -896,9 +919,17 @@ class LocalImportRequest(BaseModel):
     paths: list[str]
 
 
+def default_vault_root() -> Path:
+    configured_root = os.environ.get("LORASUITE_VAULT_ROOT")
+    if configured_root:
+        return Path(configured_root)
+
+    return Path.home() / ".lorasuite" / "vault"
+
+
 def create_app(vault_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="LoraSuite Engine")
-    app.state.vault_root = vault_root or Path(".lorasuite/vault")
+    app.state.vault_root = vault_root or default_vault_root()
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -1262,6 +1293,7 @@ def test_runcomfy_export_endpoint(client, tmp_path):
 Extend `engine/src/lorasuite_engine/api.py`:
 
 ```python
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -1282,9 +1314,17 @@ class RunComfyImageExportRequest(BaseModel):
     source_segment_ids: list[str]
 
 
+def default_vault_root() -> Path:
+    configured_root = os.environ.get("LORASUITE_VAULT_ROOT")
+    if configured_root:
+        return Path(configured_root)
+
+    return Path.home() / ".lorasuite" / "vault"
+
+
 def create_app(vault_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="LoraSuite Engine")
-    app.state.vault_root = vault_root or Path(".lorasuite/vault")
+    app.state.vault_root = vault_root or default_vault_root()
 
     @app.get("/health")
     def health() -> dict[str, str]:
