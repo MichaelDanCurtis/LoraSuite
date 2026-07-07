@@ -63,13 +63,42 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## First Slice Workflow
 
 1. Open **Data Ingress**.
-2. Paste absolute paths to local images or videos.
-3. Import them into the vault.
-4. Open **Video Review** and select segment intent flags.
-5. Extract frames through the engine tests or direct API.
-6. Open **Exports**.
-7. Paste frame paths and choose an output folder.
-8. Create the RunComfy AI Toolkit image export.
+2. Scan local files or folders.
+3. Review candidates in **Tile**, **List**, or **Gallery** mode.
+4. Confirm selected candidates to import them into the vault.
+5. Watch the ingress job table for completion.
+6. Open **Video Review** and select segment intent flags.
+7. Extract frames through the engine tests or direct API.
+8. Open **Exports**.
+9. Paste frame paths and choose an output folder.
+10. Create the RunComfy AI Toolkit image export.
+
+## Local Ingress Review
+
+The **Data Ingress** tab uses scan -> review -> confirm.
+
+1. Open **Data Ingress**.
+2. Click **Choose Files** or **Choose Folder** in the Tauri app.
+3. In browser-only development, paste absolute paths into **Manual path fallback** and click **Scan Manual Paths**.
+4. Review candidates in **Tile**, **List**, or **Gallery** mode.
+5. Select the candidates to import.
+6. Click **Confirm Ingest**.
+7. Watch the ingress job table for status.
+8. Completed imports are added to the app's media list for **Curate / Search**.
+
+The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies only selected ready candidates.
+
+## Legacy Direct Import API
+
+The engine still exposes `/vault/import/local` for direct tests and compatibility, but the product UI should use the ingress scan/job flow.
+
+## Video and Export Workflow
+
+1. Open **Video Review** and select segment intent flags.
+2. Extract frames through the engine tests or direct API.
+3. Open **Exports**.
+4. Paste frame paths and choose an output folder.
+5. Create the RunComfy AI Toolkit image export.
 
 ## Export Safety
 
