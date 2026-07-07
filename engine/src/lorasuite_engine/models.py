@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from enum import StrEnum
+from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def new_id(prefix: str) -> str:
@@ -87,12 +88,20 @@ class SegmentCreate(BaseModel):
     use_for_video: bool = False
     use_for_voice: bool = False
 
-    @field_validator("end_seconds")
+    @field_validator("start_seconds", "end_seconds")
     @classmethod
-    def end_must_be_positive(cls, value: float) -> float:
-        if value <= 0:
-            raise ValueError("end_seconds must be positive")
+    def seconds_must_be_finite(cls, value: float) -> float:
+        if not isfinite(value):
+            raise ValueError("segment seconds must be finite")
         return value
+
+    @model_validator(mode="after")
+    def range_must_be_valid(self) -> Self:
+        if self.start_seconds < 0:
+            raise ValueError("start_seconds must be zero or greater")
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("end_seconds must be greater than start_seconds")
+        return self
 
 
 class Segment(SegmentCreate):
