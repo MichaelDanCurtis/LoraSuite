@@ -29,11 +29,7 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
 
     @app.post("/vault/import/local")
     def import_local(request: LocalImportRequest) -> dict[str, list[dict]]:
-        media_items = VaultService(app.state.vault_root).import_local_paths(request.paths)
-        return {
-            "media_items": [
-                media_item.model_dump(mode="json") for media_item in media_items
-            ]
-        }
+        result = VaultService(app.state.vault_root).import_local_paths(request.paths)
+        return result.model_dump(mode="json")
 
     return app

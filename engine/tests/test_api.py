@@ -39,6 +39,7 @@ def test_import_local_image_endpoint_copies_file_and_returns_media_items(client,
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["errors"] == []
     assert len(payload["media_items"]) == 1
     media_item = payload["media_items"][0]
     raw_path = Path(media_item["raw_path"])
@@ -49,3 +50,17 @@ def test_import_local_image_endpoint_copies_file_and_returns_media_items(client,
     assert media_item["width"] == 17
     assert media_item["height"] == 29
     assert media_item["metadata_json"]["original_path"] == str(image_path)
+
+
+def test_import_local_endpoint_returns_errors_for_invalid_paths(client, tmp_path):
+    missing_path = tmp_path / "missing.png"
+
+    response = client.post("/vault/import/local", json={"paths": [str(missing_path)]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["media_items"] == []
+    assert payload["errors"][0]["path"] == str(missing_path)
+    assert payload["errors"][0]["code"] == "missing_path"
+    assert not (tmp_path / "vault" / "raw").exists()
+    assert not (tmp_path / "vault" / "vault.json").exists()
