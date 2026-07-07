@@ -36,7 +36,24 @@ class MediaStatus(StrEnum):
     EXPORTED = "exported"
 
 
+class IngressCandidateStatus(StrEnum):
+    READY = "ready"
+    DUPLICATE = "duplicate"
+    UNSUPPORTED = "unsupported"
+    ERROR = "error"
+
+
+class IngressJobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
 class AssetType(StrEnum):
+    THUMBNAIL = "thumbnail"
+    POSTER = "poster"
     FRAME = "frame"
     CLIP = "clip"
     AUDIO = "audio"
@@ -75,6 +92,54 @@ class MediaItem(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     metadata_json: dict[str, Any] = Field(default_factory=dict)
     status: MediaStatus = MediaStatus.NEW
+
+
+class IngressCandidate(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("candidate"))
+    source_kind: SourceKind
+    source_locator: str
+    display_name: str
+    media_type: MediaType | None = None
+    size_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None
+    thumbnail_path: Path | None = None
+    poster_asset_path: Path | None = None
+    status: IngressCandidateStatus = IngressCandidateStatus.READY
+    error_message: str | None = None
+    selected: bool = False
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngressScanResult(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("scan"))
+    candidates: list[IngressCandidate] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
+class IngressJob(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("ingress_job"))
+    source_kind: SourceKind
+    candidate_ids: list[str] = Field(default_factory=list)
+    candidate_count: int = 0
+    selected_count: int = 0
+    imported_count: int = 0
+    skipped_count: int = 0
+    failed_count: int = 0
+    status: IngressJobStatus = IngressJobStatus.QUEUED
+    progress_message: str = "Queued"
+    errors: list[dict[str, str]] = Field(default_factory=list)
+    imported_media_items: list[MediaItem] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def count_candidates(self) -> Self:
+        if self.candidate_count == 0 and self.candidate_ids:
+            self.candidate_count = len(self.candidate_ids)
+        return self
 
 
 class SegmentCreate(BaseModel):
