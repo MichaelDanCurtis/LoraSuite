@@ -35,4 +35,18 @@ describe("App", () => {
     expect(screen.getByText("Extract sparse keyframes from stable visual ranges.")).toBeInTheDocument();
     expect(screen.getByText("Prefer clean speech with one speaker and low noise.")).toBeInTheDocument();
   });
+
+  it("shows RunComfy export controls", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Exports" }));
+
+    expect(screen.getByLabelText("Frame paths")).toBeInTheDocument();
+    expect(screen.getByLabelText("Output folder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Caption template")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Create RunComfy Image Export" }),
+    ).toBeInTheDocument();
+  });
 });
