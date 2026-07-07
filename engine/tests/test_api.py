@@ -64,3 +64,31 @@ def test_import_local_endpoint_returns_errors_for_invalid_paths(client, tmp_path
     assert payload["errors"][0]["code"] == "missing_path"
     assert not (tmp_path / "vault" / "raw").exists()
     assert not (tmp_path / "vault" / "vault.json").exists()
+
+
+def test_runcomfy_export_endpoint(client, tmp_path):
+    frame = tmp_path / "frame.png"
+    Image.new("RGB", (24, 24), color=(40, 50, 60)).save(frame)
+    output_dir = tmp_path / "export"
+
+    response = client.post(
+        "/exports/runcomfy-image",
+        json={
+            "frames": [str(frame)],
+            "output_dir": str(output_dir),
+            "caption_template": "person trigger_token",
+            "source_segment_ids": ["segment-1"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["export_type"] == "runcomfy_image"
+    assert body["output_path"] == str(output_dir)
+    assert body["manifest_path"] == str(output_dir / "manifest.json")
+    assert body["source_segment_ids"] == ["segment-1"]
+    assert body["status"] == "complete"
+    assert (output_dir / "images" / "000001.png").exists()
+    assert (output_dir / "images" / "000001.txt").read_text(
+        encoding="utf-8"
+    ) == "person trigger_token\n"
