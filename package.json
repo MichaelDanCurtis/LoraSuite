@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
-    "engine:test": "python -m pytest engine/tests -q"
+    "engine:test": "engine/.venv/bin/python -m pytest engine/tests -q"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
