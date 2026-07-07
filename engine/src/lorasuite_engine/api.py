@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field
 from lorasuite_engine.exports import create_runcomfy_image_export
 from lorasuite_engine.ingress import IngressService
 from lorasuite_engine.models import SourceKind
+from lorasuite_engine.social_helper import scan_instagram_helper_payload
 from lorasuite_engine.vault import VaultService
 
 
@@ -24,6 +26,11 @@ class RunComfyImageExportRequest(BaseModel):
 class LocalIngressScanRequest(BaseModel):
     roots: list[Path]
     recursive: bool = True
+
+
+class InstagramHelperScanRequest(BaseModel):
+    payload: dict[str, Any]
+    include_video_posters_as_image_candidates: bool = True
 
 
 class IngressJobRequest(BaseModel):
@@ -75,6 +82,20 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
             request.roots,
             recursive=request.recursive,
         )
+        return result.model_dump(mode="json")
+
+    @app.post("/ingress/instagram/helper-scan")
+    def scan_instagram_helper(request: InstagramHelperScanRequest) -> dict[str, object]:
+        try:
+            result = scan_instagram_helper_payload(
+                request.payload,
+                app.state.vault_root,
+                include_video_posters_as_image_candidates=(
+                    request.include_video_posters_as_image_candidates
+                ),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return result.model_dump(mode="json")
 
     @app.post("/ingress/jobs")

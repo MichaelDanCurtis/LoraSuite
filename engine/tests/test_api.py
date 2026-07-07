@@ -143,6 +143,36 @@ def test_local_ingress_scan_endpoint_returns_candidates(client, tmp_path):
     assert candidate["thumbnail_path"]
 
 
+def test_instagram_helper_scan_endpoint_returns_poster_candidates(client, tmp_path):
+    poster = tmp_path / "api-poster.jpg"
+    Image.new("RGB", (44, 66), color=(80, 20, 140)).save(poster)
+
+    response = client.post(
+        "/ingress/instagram/helper-scan",
+        json={
+            "payload": {
+                "helper_version": "fixture",
+                "media": [
+                    {
+                        "id": "ig_api_video",
+                        "source_url": "https://www.instagram.com/reel/api/",
+                        "display_name": "api reel",
+                        "media_type": "video",
+                        "poster_path": str(poster),
+                    }
+                ],
+            },
+            "include_video_posters_as_image_candidates": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["candidates"]) == 2
+    assert body["candidates"][0]["source_kind"] == "instagram"
+    assert body["candidates"][1]["media_type"] == "image"
+
+
 def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):
     image_path = tmp_path / "job-image.png"
     Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
