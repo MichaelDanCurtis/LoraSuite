@@ -446,7 +446,7 @@ app = create_app()
 Run:
 
 ```bash
-engine/.venv/bin/python -m pytest engine/tests/test_api.py::test_health_endpoint_reports_ok -q
+engine/.venv/bin/python -m pytest engine/tests/test_api.py -q
 ```
 
 Expected:
