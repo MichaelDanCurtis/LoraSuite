@@ -60,6 +60,27 @@ describe("createEngineClient", () => {
     });
   });
 
+  it("posts instagram helper payloads to the engine", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "scan_ig", candidates: [], errors: [] }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+    const payload = { helper_version: "fixture", media: [] };
+
+    await client.scanInstagramHelperPayload(payload, true);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://engine.test/ingress/instagram/helper-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        payload,
+        include_video_posters_as_image_candidates: true,
+      }),
+    });
+  });
+
   it("creates an ingress job", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

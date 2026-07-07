@@ -64,6 +64,18 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Confirm Ingest" })).toBeDisabled();
   });
 
+  it("shows instagram helper payload controls", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+
+    expect(screen.getByLabelText("Instagram helper payload")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Scan Instagram Helper Payload" }),
+    ).toBeInTheDocument();
+  });
+
   it("switches local ingress review modes", async () => {
     const user = userEvent.setup();
     render(<App />);

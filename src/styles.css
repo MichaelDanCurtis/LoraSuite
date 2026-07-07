@@ -239,6 +239,7 @@ fieldset input {
 .ingress-actions button,
 .review-toolbar button,
 .manual-ingress button,
+.helper-payload-panel button,
 .gallery-controls button {
   min-height: 36px;
   padding: 0 12px;
@@ -256,6 +257,10 @@ fieldset input {
 }
 
 .manual-ingress {
+  max-width: 760px;
+}
+
+.helper-payload-panel {
   max-width: 760px;
 }
 

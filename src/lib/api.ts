@@ -19,6 +19,10 @@ type FetchLike = (input: string, init: RequestInit) => Promise<EngineResponse>;
 export interface EngineClient {
   importLocal(paths: string[]): Promise<LocalImportResponse>;
   scanLocalIngress(roots: string[], recursive?: boolean): Promise<IngressScanResult>;
+  scanInstagramHelperPayload(
+    payload: Record<string, unknown>,
+    includeVideoPostersAsImageCandidates?: boolean,
+  ): Promise<IngressScanResult>;
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
   listIngressJobs(): Promise<IngressJob[]>;
   getIngressJob(jobId: string): Promise<IngressJob>;
@@ -67,6 +71,15 @@ export function createEngineClient(
     },
     scanLocalIngress(roots: string[], recursive = true) {
       return postJson<IngressScanResult>("/ingress/local/scan", { roots, recursive });
+    },
+    scanInstagramHelperPayload(
+      payload: Record<string, unknown>,
+      includeVideoPostersAsImageCandidates = true,
+    ) {
+      return postJson<IngressScanResult>("/ingress/instagram/helper-scan", {
+        payload,
+        include_video_posters_as_image_candidates: includeVideoPostersAsImageCandidates,
+      });
     },
     createIngressJob(request: CreateIngressJobRequest) {
       return postJson<IngressJob>("/ingress/jobs", request);

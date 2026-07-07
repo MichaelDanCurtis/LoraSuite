@@ -29,6 +29,10 @@ export function DataIngressTab({
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [jobs, setJobs] = useState<IngressJob[]>([]);
+  const [showInstagramHelper, setShowInstagramHelper] = useState(false);
+  const [instagramPayloadText, setInstagramPayloadText] = useState(
+    '{\n  "helper_version": "fixture",\n  "media": []\n}',
+  );
 
   const visibleCandidates = candidates.filter((candidate) => {
     return mediaFilter === "all" || candidate.media_type === mediaFilter;
@@ -104,12 +108,44 @@ export function DataIngressTab({
     }
   }
 
+  async function scanInstagramHelperPayload() {
+    try {
+      const payload = JSON.parse(instagramPayloadText) as Record<string, unknown>;
+      setStatus("Scanning Instagram helper payload.");
+      const result = await engine.scanInstagramHelperPayload(payload, true);
+      setCandidates(result.candidates);
+      setSelectedIds(
+        new Set(
+          result.candidates
+            .filter((candidate) => candidate.status === "ready" && candidate.selected)
+            .map((candidate) => candidate.id),
+        ),
+      );
+      setGalleryIndex(0);
+      setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Instagram helper scan failed.");
+    }
+  }
+
   async function confirmIngest() {
-    const candidateIds = candidates
-      .filter((candidate) => candidate.status === "ready" && selectedIds.has(candidate.id))
-      .map((candidate) => candidate.id);
+    const selectedCandidates = candidates.filter(
+      (candidate) => candidate.status === "ready" && selectedIds.has(candidate.id),
+    );
+    const candidateIds = selectedCandidates.map((candidate) => candidate.id);
 
     if (candidateIds.length === 0) {
+      setStatus("Select at least one ready candidate.");
+      return;
+    }
+
+    const sourceKinds = new Set(selectedCandidates.map((candidate) => candidate.source_kind));
+    if (sourceKinds.size !== 1) {
+      setStatus("Confirm one source type at a time.");
+      return;
+    }
+    const sourceKind = selectedCandidates[0]?.source_kind;
+    if (!sourceKind) {
       setStatus("Select at least one ready candidate.");
       return;
     }
@@ -117,7 +153,7 @@ export function DataIngressTab({
     setStatus("Creating ingress job.");
     try {
       const job = await engine.createIngressJob({
-        source_kind: "local",
+        source_kind: sourceKind,
         candidate_ids: candidateIds,
       });
       setJobs((currentJobs) => upsertJob(currentJobs, job));
@@ -213,13 +249,28 @@ export function DataIngressTab({
         <button type="button" onClick={chooseFolder}>
           Choose Folder
         </button>
-        <button type="button" disabled>
+        <button type="button" onClick={() => setShowInstagramHelper((visible) => !visible)}>
           Instagram Source
         </button>
         <button type="button" disabled>
           X Source
         </button>
       </div>
+
+      {showInstagramHelper && (
+        <div className="form-stack helper-payload-panel">
+          <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
+          <textarea
+            id="instagram-helper-payload"
+            value={instagramPayloadText}
+            onChange={(event) => setInstagramPayloadText(event.target.value)}
+            rows={8}
+          />
+          <button type="button" onClick={scanInstagramHelperPayload}>
+            Scan Instagram Helper Payload
+          </button>
+        </div>
+      )}
 
       <div className="form-stack manual-ingress">
         <label htmlFor="manual-paths">Manual path fallback</label>
