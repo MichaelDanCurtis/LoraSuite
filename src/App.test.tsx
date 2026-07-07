@@ -23,4 +23,16 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Curate / Search" })).toBeInTheDocument();
     expect(screen.getByText("PhotoMapAI-derived curation workspace")).toBeInTheDocument();
   });
+
+  it("shows segment intent guidance in video review", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Video Review" }));
+    await user.click(screen.getByLabelText("Use for image training"));
+    await user.click(screen.getByLabelText("Use for voice training / cloning"));
+
+    expect(screen.getByText("Extract sparse keyframes from stable visual ranges.")).toBeInTheDocument();
+    expect(screen.getByText("Prefer clean speech with one speaker and low noise.")).toBeInTheDocument();
+  });
 });

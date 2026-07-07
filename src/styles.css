@@ -141,3 +141,83 @@ h2 {
   font-size: 1.25rem;
   font-weight: 700;
 }
+
+.form-stack {
+  display: grid;
+  gap: 10px;
+  max-width: 680px;
+  margin-bottom: 22px;
+}
+
+.form-stack label,
+.field-grid label,
+fieldset legend {
+  color: #27343b;
+  font-weight: 650;
+}
+
+.form-stack textarea,
+.field-grid input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid #bbc7c0;
+  background: #ffffff;
+  color: #172026;
+}
+
+.primary-action {
+  width: fit-content;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #225c63;
+  background: #276a72;
+  color: #ffffff;
+}
+
+.status-line {
+  min-height: 20px;
+  margin: 0;
+  color: #58666e;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 220px));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+fieldset {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid #d7ddd6;
+}
+
+fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+fieldset input {
+  width: auto;
+  margin: 0;
+}
+
+.guidance-block {
+  display: grid;
+  gap: 6px;
+  max-width: 640px;
+}
+
+.guidance-block h3,
+.guidance-block p {
+  margin: 0;
+}
