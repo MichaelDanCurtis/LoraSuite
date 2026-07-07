@@ -53,11 +53,14 @@ class IngressService:
             for path in self._expand_root(root_path, recursive=recursive):
                 result.candidates.append(self._candidate_for_path(path))
 
+        self.store_candidates(result.candidates)
+        return result
+
+    def store_candidates(self, candidates: list[IngressCandidate]) -> None:
         stored_candidates = self._read_candidates()
-        for candidate in result.candidates:
+        for candidate in candidates:
             stored_candidates[candidate.id] = candidate
         self._write_candidates(stored_candidates)
-        return result
 
     def create_job(self, source_kind: SourceKind, candidate_ids: list[str]) -> IngressJob:
         job = IngressJob(

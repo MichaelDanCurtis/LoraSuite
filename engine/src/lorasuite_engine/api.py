@@ -96,6 +96,7 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        ingress_service().store_candidates(result.candidates)
         return result.model_dump(mode="json")
 
     @app.post("/ingress/jobs")

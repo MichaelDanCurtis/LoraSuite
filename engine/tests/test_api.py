@@ -173,6 +173,53 @@ def test_instagram_helper_scan_endpoint_returns_poster_candidates(client, tmp_pa
     assert body["candidates"][1]["media_type"] == "image"
 
 
+def test_instagram_helper_scan_endpoint_stores_poster_candidates_for_jobs(
+    client, tmp_path
+):
+    poster = tmp_path / "api-job-poster.jpg"
+    Image.new("RGB", (44, 66), color=(30, 120, 80)).save(poster)
+    scan = client.post(
+        "/ingress/instagram/helper-scan",
+        json={
+            "payload": {
+                "helper_version": "fixture",
+                "media": [
+                    {
+                        "id": "ig_api_job_video",
+                        "source_url": "https://www.instagram.com/reel/api-job/",
+                        "display_name": "api job reel",
+                        "media_type": "video",
+                        "poster_path": str(poster),
+                    }
+                ],
+            }
+        },
+    ).json()
+    poster_candidate = [
+        candidate
+        for candidate in scan["candidates"]
+        if candidate["media_type"] == "image"
+    ][0]
+
+    response = client.post(
+        "/ingress/jobs",
+        json={
+            "source_kind": "instagram",
+            "candidate_ids": [poster_candidate["id"]],
+            "options": {},
+        },
+    )
+
+    assert response.status_code == 200
+    job = response.json()
+    detail = client.get(f"/ingress/jobs/{job['id']}").json()
+    assert detail["status"] == "complete"
+    assert detail["imported_count"] == 1
+    assert detail["imported_media_items"][0]["metadata_json"]["original_path"] == (
+        poster_candidate["metadata_json"]["local_import_path"]
+    )
+
+
 def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):
     image_path = tmp_path / "job-image.png"
     Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
