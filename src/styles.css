@@ -2,8 +2,8 @@
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  color: #17202a;
-  background: #f5f7f8;
+  color: #172026;
+  background: #f6f7f4;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -37,22 +37,13 @@ button {
   grid-template-rows: auto auto 1fr;
 }
 
-.top-bar {
+.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px 16px;
-  border-bottom: 1px solid #d9e0e4;
+  padding: 20px 28px 16px;
+  border-bottom: 1px solid #d7ddd6;
   background: #ffffff;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: #426b5f;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
 }
 
 h1,
@@ -62,7 +53,8 @@ h2 {
 }
 
 h1 {
-  font-size: clamp(1.45rem, 1.2rem + 1vw, 2rem);
+  margin-bottom: 4px;
+  font-size: 28px;
   line-height: 1.1;
 }
 
@@ -70,38 +62,82 @@ h2 {
   font-size: 1.15rem;
 }
 
-.tab-bar {
+.app-header p,
+.section-header p,
+.muted {
+  margin: 0;
+  color: #58666e;
+}
+
+.workspace-tabs {
   display: flex;
-  gap: 4px;
-  padding: 8px 16px 0;
+  gap: 6px;
+  padding: 10px 16px 0;
   overflow-x: auto;
-  background: #ffffff;
-  border-bottom: 1px solid #d9e0e4;
+  background: #eef2ee;
+  border-bottom: 1px solid #d7ddd6;
 }
 
 .tab {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 14px;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  color: #52616a;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  color: #35424a;
   background: transparent;
   white-space: nowrap;
 }
 
 .tab:hover,
 .tab:focus-visible {
-  color: #17202a;
-  background: #edf2f0;
+  color: #11181c;
+  background: #e3e9e5;
   outline: none;
 }
 
 .tab.active {
-  color: #173f35;
-  border-bottom-color: #2c806a;
-  font-weight: 700;
+  color: #11181c;
+  background: #ffffff;
+  border-color: #d7ddd6;
+  font-weight: 650;
 }
 
 .workspace-panel {
-  padding: 24px;
+  padding: 24px 28px;
+}
+
+.workspace-section {
+  max-width: 980px;
+}
+
+.section-header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 180px));
+  gap: 14px;
+  margin: 0;
+}
+
+.metric-grid div {
+  padding: 12px 14px;
+  border: 1px solid #d7ddd6;
+  background: #ffffff;
+}
+
+.metric-grid dt {
+  margin-bottom: 4px;
+  color: #58666e;
+  font-size: 0.84rem;
+}
+
+.metric-grid dd {
+  margin: 0;
+  color: #172026;
+  font-size: 1.25rem;
+  font-weight: 700;
 }

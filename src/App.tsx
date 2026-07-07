@@ -1,29 +1,61 @@
-const tabs = ["Data Ingress", "Curate / Search", "Video Review", "Exports"];
+import { useMemo, useState } from "react";
+
+import { CurateSearchTab } from "./components/CurateSearchTab";
+import { DataIngressTab } from "./components/DataIngressTab";
+import { ExportsTab } from "./components/ExportsTab";
+import { VideoReviewTab } from "./components/VideoReviewTab";
+import { createEngineClient } from "./lib/api";
+import type { MediaItem } from "./lib/types";
+
+type TabId = "ingress" | "curate" | "video" | "exports";
+
+const tabs: Array<{ id: TabId; label: string }> = [
+  { id: "ingress", label: "Data Ingress" },
+  { id: "curate", label: "Curate / Search" },
+  { id: "video", label: "Video Review" },
+  { id: "exports", label: "Exports" },
+];
 
 function App() {
+  const [activeTab, setActiveTab] = useState<TabId>("ingress");
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const engine = useMemo(() => createEngineClient(), []);
+
   return (
     <main className="app-shell">
-      <header className="top-bar">
+      <header className="app-header">
         <div>
-          <p className="eyebrow">LoraSuite</p>
-          <h1>Dataset Workspace</h1>
+          <h1>LoraSuite</h1>
+          <p>Local media to training-ready LoRA dataset handoffs.</p>
         </div>
       </header>
 
-      <nav className="tab-bar" aria-label="Workspace sections">
-        {tabs.map((tab, index) => (
+      <nav className="workspace-tabs" role="tablist" aria-label="LoraSuite workspace">
+        {tabs.map((tab) => (
           <button
-            className={index === 0 ? "tab active" : "tab"}
+            key={tab.id}
+            role="tab"
             type="button"
-            key={tab}
+            aria-selected={activeTab === tab.id}
+            className={activeTab === tab.id ? "tab active" : "tab"}
+            onClick={() => setActiveTab(tab.id)}
           >
-            {tab}
+            {tab.label}
           </button>
         ))}
       </nav>
 
-      <section className="workspace-panel" aria-label="Active workspace">
-        <h2>Data Ingress</h2>
+      <section className="workspace-panel" role="tabpanel">
+        {activeTab === "ingress" && (
+          <DataIngressTab
+            engine={engine}
+            mediaItems={mediaItems}
+            onMediaItemsImported={setMediaItems}
+          />
+        )}
+        {activeTab === "curate" && <CurateSearchTab mediaItems={mediaItems} />}
+        {activeTab === "video" && <VideoReviewTab mediaItems={mediaItems} />}
+        {activeTab === "exports" && <ExportsTab engine={engine} />}
       </section>
     </main>
   );
