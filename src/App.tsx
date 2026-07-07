@@ -21,6 +21,10 @@ function App() {
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const engine = useMemo(() => createEngineClient(), []);
 
+  function addMediaItems(items: MediaItem[]) {
+    setMediaItems((existingItems) => [...existingItems, ...items]);
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -50,7 +54,7 @@ function App() {
           <DataIngressTab
             engine={engine}
             mediaItems={mediaItems}
-            onMediaItemsImported={setMediaItems}
+            onMediaItemsImported={addMediaItems}
           />
         )}
         {activeTab === "curate" && <CurateSearchTab mediaItems={mediaItems} />}

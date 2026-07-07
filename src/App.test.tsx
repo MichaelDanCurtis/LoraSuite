@@ -49,4 +49,35 @@ describe("App", () => {
       screen.getByRole("button", { name: "Create RunComfy Image Export" }),
     ).toBeInTheDocument();
   });
+
+  it("shows local ingress candidate review controls", () => {
+    render(<App />);
+
+    expect(screen.getByRole("button", { name: "Choose Files" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose Folder" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tile" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "List" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gallery" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm Ingest" })).toBeDisabled();
+  });
+
+  it("switches local ingress review modes", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Gallery" }));
+    expect(screen.getByRole("button", { name: "Gallery" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 });
