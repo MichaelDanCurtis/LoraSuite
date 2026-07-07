@@ -125,3 +125,53 @@ def test_runcomfy_export_endpoint_returns_400_for_empty_frames(client, tmp_path)
 
     assert response.status_code == 400
     assert "At least one frame is required" in response.json()["detail"]
+
+
+def test_local_ingress_scan_endpoint_returns_candidates(client, tmp_path):
+    image_path = tmp_path / "scan-image.png"
+    Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
+
+    response = client.post("/ingress/local/scan", json={"roots": [str(image_path)]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["candidates"]) == 1
+    candidate = payload["candidates"][0]
+    assert candidate["display_name"] == "scan-image.png"
+    assert candidate["status"] == "ready"
+    assert candidate["selected"] is True
+    assert candidate["thumbnail_path"]
+
+
+def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):
+    image_path = tmp_path / "job-image.png"
+    Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
+    scan = client.post("/ingress/local/scan", json={"roots": [str(image_path)]}).json()
+    candidate_id = scan["candidates"][0]["id"]
+
+    response = client.post(
+        "/ingress/jobs",
+        json={"source_kind": "local", "candidate_ids": [candidate_id], "options": {}},
+    )
+
+    assert response.status_code == 200
+    job = response.json()
+    detail = client.get(f"/ingress/jobs/{job['id']}").json()
+    assert detail["status"] == "complete"
+    assert detail["imported_count"] == 1
+    assert detail["imported_media_items"][0]["metadata_json"]["original_path"] == str(
+        image_path
+    )
+
+
+def test_ingress_jobs_endpoint_lists_recent_jobs(client, tmp_path):
+    image_path = tmp_path / "listed-image.png"
+    Image.new("RGB", (12, 14), color=(10, 20, 30)).save(image_path)
+    scan = client.post("/ingress/local/scan", json={"roots": [str(image_path)]}).json()
+    candidate_id = scan["candidates"][0]["id"]
+    client.post("/ingress/jobs", json={"source_kind": "local", "candidate_ids": [candidate_id]})
+
+    response = client.get("/ingress/jobs")
+
+    assert response.status_code == 200
+    assert response.json()[0]["source_kind"] == "local"
