@@ -74,6 +74,7 @@ The frontend is TypeScript + React + Vite.
 
 It owns:
 
+- the persistent workspace tab shell;
 - acquisition setup screens;
 - source account and cookie-profile controls;
 - media vault browsing;
@@ -82,6 +83,19 @@ It owns:
 - curation UI over PhotoMapAI-derived results;
 - export presets and export status;
 - job progress, warnings, and recoverable error states.
+
+### Workspace Tabs
+
+V1 should use a tabbed workspace so PhotoMapAI can live as a substantial app surface without becoming the whole product.
+
+Initial tabs:
+
+- **Data Ingress**: local imports, Instagram/X/Twitter/TikTok source setup, cookie profiles, acquisition jobs, and import provenance.
+- **Curate / Search**: the embedded PhotoMapAI-derived workspace for browsing, semantic search, albums, UMAP/clusters, representative selection, and dataset curation.
+- **Video Review**: video player, free start/end segment selection, image/video/voice intent toggles, and segment quality guidance.
+- **Exports**: RunComfy AI Toolkit image dataset exports, video clip handoffs, voice handoffs, manifests, and export reports.
+
+The first implementation can keep these as top-level app tabs. Later versions can add deeper navigation inside each tab, but V1 should avoid burying ingress or curation behind modal workflows.
 
 ### Python Sidecar Engine
 
@@ -110,7 +124,7 @@ The retained core capabilities are:
 - UMAP and clustering;
 - diversity and representative selection for LoRA candidate curation.
 
-The current PhotoMapAI UI should not be the main LoraSuite UI. Its backend and curation ideas are the valuable parts.
+The current PhotoMapAI UI should not be the whole LoraSuite shell. A compatible PhotoMapAI-derived workspace can sit inside the **Curate / Search** tab while its backend and curation ideas are carved into reusable LoraSuite components.
 
 ## Data Model
 
@@ -317,6 +331,7 @@ Export errors should fail the package atomically where possible. Partial exports
 
 ### UI Tests
 
+- workspace tab navigation;
 - media import flow;
 - video segment selection;
 - intent toggle behavior;
@@ -328,14 +343,15 @@ Export errors should fail the package atomically where possible. Partial exports
 The first implementation slice should prove the product loop without social connectors:
 
 1. Scaffold Tauri + React/Vite frontend and Python sidecar.
-2. Import local images/videos into the vault.
-3. Review one local video.
-4. Select a segment with free start/end.
-5. Toggle image/video/voice intents.
-6. Extract image frames for image intent.
-7. Export a RunComfy AI Toolkit image dataset folder.
-8. Write `manifest.json`.
-9. Add basic tests for vault, segment, FFmpeg frame extraction, and export folder validation.
+2. Add the workspace tab shell with **Data Ingress**, **Curate / Search**, **Video Review**, and **Exports** tabs.
+3. Import local images/videos into the vault from **Data Ingress**.
+4. Review one local video in **Video Review**.
+5. Select a segment with free start/end.
+6. Toggle image/video/voice intents.
+7. Extract image frames for image intent.
+8. Export a RunComfy AI Toolkit image dataset folder from **Exports**.
+9. Write `manifest.json`.
+10. Add basic tests for vault, segment, tab navigation, FFmpeg frame extraction, and export folder validation.
 
 After that slice works, add Instagram/X/TikTok acquisition connectors.
 
@@ -352,10 +368,10 @@ This design locks the major V1 product and architecture decisions:
 - Tauri desktop app.
 - TypeScript + React/Vite UI.
 - Python sidecar engine.
-- Embedded PhotoMapAI core.
+- Tabbed workspace shell with separate **Data Ingress**, **Curate / Search**, **Video Review**, and **Exports** tabs.
+- Embedded PhotoMapAI-derived workspace in the **Curate / Search** tab.
 - Acquisition from Instagram, X/Twitter, TikTok, and local folders.
 - Segment-level image/video/voice training intents.
 - Intent-aware duration guidance.
 - RunComfy AI Toolkit image dataset export as the first concrete handoff.
 - No in-app training.
-
