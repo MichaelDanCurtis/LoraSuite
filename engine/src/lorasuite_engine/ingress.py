@@ -1,6 +1,11 @@
 import json
+import ssl
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
@@ -15,6 +20,21 @@ from lorasuite_engine.models import (
     utc_now,
 )
 from lorasuite_engine.vault import VaultService, detect_media_type, image_dimensions
+
+MAX_REMOTE_DOWNLOAD_BYTES = 1024 * 1024 * 1024
+REMOTE_DOWNLOAD_SUFFIXES_BY_CONTENT_TYPE = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+}
+REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE = {
+    MediaType.VIDEO: ".mp4",
+    MediaType.AUDIO: ".m4a",
+}
+WEB_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 
 class IngressService:
@@ -89,18 +109,25 @@ class IngressService:
             for candidate_id in job.candidate_ids
             if candidate_id in candidates
         ]
-        ready_import_paths = [
+        direct_import_paths = [
             import_path
             for candidate in selected_candidates
             if candidate.status == IngressCandidateStatus.READY
             for import_path in [self._import_path_for_candidate(candidate)]
             if import_path is not None
         ]
+        (
+            downloaded_import_paths,
+            download_errors,
+            handled_download_candidate_ids,
+        ) = self._download_remote_candidates(selected_candidates)
+        ready_import_paths = direct_import_paths + downloaded_import_paths
         deferred_downloads = [
             deferred_download
             for candidate in selected_candidates
             if candidate.status == IngressCandidateStatus.READY
             and self._import_path_for_candidate(candidate) is None
+            and candidate.id not in handled_download_candidate_ids
             for deferred_download in [self._deferred_download_for_candidate(candidate)]
             if deferred_download is not None
         ]
@@ -110,6 +137,7 @@ class IngressService:
             if candidate.status != IngressCandidateStatus.READY
             or (
                 self._import_path_for_candidate(candidate) is None
+                and candidate.id not in handled_download_candidate_ids
                 and self._deferred_download_for_candidate(candidate) is None
             )
         ]
@@ -124,7 +152,10 @@ class IngressService:
         job.deferred_candidates = deferred_downloads
         job.deferred_count = len(deferred_downloads)
         job.failed_count = (
-            len(import_result.errors) + len(rejected_candidates) + len(missing_ids)
+            len(import_result.errors)
+            + len(download_errors)
+            + len(rejected_candidates)
+            + len(missing_ids)
         )
         job.skipped_count = max(
             0,
@@ -135,7 +166,7 @@ class IngressService:
         )
         job.errors = [
             error.model_dump(mode="json") for error in import_result.errors
-        ] + [
+        ] + download_errors + [
             {
                 "path": candidate.source_locator,
                 "code": candidate.status.value,
@@ -198,6 +229,149 @@ class IngressService:
         if isinstance(local_import_path, str) and local_import_path:
             return Path(local_import_path)
         return None
+
+    def _download_remote_candidates(
+        self, candidates: list[IngressCandidate]
+    ) -> tuple[list[Path], list[dict[str, str]], set[str]]:
+        downloaded_paths: list[Path] = []
+        errors: list[dict[str, str]] = []
+        handled_candidate_ids: set[str] = set()
+
+        for candidate in candidates:
+            if candidate.status != IngressCandidateStatus.READY:
+                continue
+            if self._import_path_for_candidate(candidate) is not None:
+                continue
+
+            download_url = self._download_url_for_candidate(candidate)
+            if download_url is None:
+                continue
+
+            handled_candidate_ids.add(candidate.id)
+            try:
+                downloaded_paths.append(
+                    self._download_remote_candidate(candidate, download_url)
+                )
+            except (HTTPError, OSError, URLError, ValueError) as exc:
+                errors.append(
+                    {
+                        "path": candidate.source_locator,
+                        "code": "download_failed",
+                        "message": f"could not download original media: {exc}",
+                    }
+                )
+
+        return downloaded_paths, errors, handled_candidate_ids
+
+    def _download_url_for_candidate(self, candidate: IngressCandidate) -> str | None:
+        if candidate.source_kind == SourceKind.LOCAL:
+            return None
+        download_url = candidate.metadata_json.get("download_url")
+        if isinstance(download_url, str) and download_url:
+            return download_url
+        return None
+
+    def _download_remote_candidate(
+        self,
+        candidate: IngressCandidate,
+        download_url: str,
+    ) -> Path:
+        parsed = urlparse(download_url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("download URL must be http or https")
+
+        target_dir = self.vault_root / "downloads" / candidate.source_kind.value
+        target_dir.mkdir(parents=True, exist_ok=True)
+        suffix = self._remote_download_suffix(
+            download_url,
+            media_type=candidate.media_type,
+        )
+        target_path = target_dir / f"{candidate.id}{suffix}"
+        if target_path.exists():
+            return target_path
+
+        temporary_path = target_path.with_name(
+            f".{target_path.name}.{uuid4().hex}.tmp"
+        )
+        request = Request(
+            download_url,
+            headers={
+                "User-Agent": WEB_USER_AGENT,
+                "Accept": "video/mp4,video/*,*/*",
+                "Referer": candidate.source_locator,
+            },
+        )
+        try:
+            with urlopen(request, timeout=120, context=self._ssl_context()) as response:
+                content_type = response.headers.get_content_type().lower()
+                self._validate_remote_download_suffix(
+                    suffix,
+                    content_type=content_type,
+                    media_type=candidate.media_type,
+                )
+                content_length = response.headers.get("Content-Length")
+                if (
+                    content_length is not None
+                    and int(content_length) > MAX_REMOTE_DOWNLOAD_BYTES
+                ):
+                    raise ValueError("remote media is larger than the download limit")
+
+                bytes_written = 0
+                with temporary_path.open("wb") as file:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        bytes_written += len(chunk)
+                        if bytes_written > MAX_REMOTE_DOWNLOAD_BYTES:
+                            raise ValueError(
+                                "remote media is larger than the download limit"
+                            )
+                        file.write(chunk)
+
+                if bytes_written == 0:
+                    raise ValueError("remote media response was empty")
+                temporary_path.replace(target_path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+
+        return target_path
+
+    def _remote_download_suffix(
+        self,
+        download_url: str,
+        *,
+        media_type: MediaType | None,
+    ) -> str:
+        suffix = Path(urlparse(download_url).path).suffix.lower()
+        if suffix in {".mp4", ".mov", ".m4v", ".webm"}:
+            return suffix
+        if media_type in REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE:
+            return REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE[media_type]
+        return ".bin"
+
+    def _validate_remote_download_suffix(
+        self,
+        suffix: str,
+        *,
+        content_type: str,
+        media_type: MediaType | None,
+    ) -> None:
+        expected_suffix = REMOTE_DOWNLOAD_SUFFIXES_BY_CONTENT_TYPE.get(content_type)
+        if expected_suffix is not None and suffix == expected_suffix:
+            return
+        if media_type == MediaType.VIDEO and suffix in {".mp4", ".mov", ".m4v", ".webm"}:
+            return
+        raise ValueError(f"unsupported remote media content type: {content_type}")
+
+    def _ssl_context(self) -> ssl.SSLContext:
+        try:
+            import certifi
+
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            return ssl.create_default_context()
 
     def _deferred_download_for_candidate(
         self, candidate: IngressCandidate

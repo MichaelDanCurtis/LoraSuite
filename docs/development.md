@@ -86,7 +86,7 @@ The **Data Ingress** tab uses scan -> review -> confirm.
 7. Watch the ingress job table for status.
 8. Completed imports are added to the app's media list for **Curate / Search**.
 
-The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies only selected ready candidates.
+The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies selected ready local candidates and downloads selected social originals when a direct media URL is available.
 
 ## Instagram Browser Scan
 
@@ -101,7 +101,7 @@ The normal Instagram v0 path uses browser cookies from a local browser session:
 7. Review the candidates in **Tile**, **List**, or **Gallery** mode.
 8. Confirm only the candidates that should enter the vault.
 
-For individual post and reel URLs, the engine uses `yt-dlp` with the selected browser's local cookies to read Instagram metadata. For profile reels tabs, the engine resolves the profile through Instagram's web API and then reads the reels/clips feed with the same browser session. Scans download only thumbnail/poster bytes for review. They do not persist browser cookies, authorization headers, CSRF tokens, or session fields.
+For individual post and reel URLs, the engine uses `yt-dlp` with the selected browser's local cookies to read Instagram metadata. For profile reels tabs, the engine resolves the profile through Instagram's web API and then reads the reels/clips feed with the same browser session. Scans download only thumbnail/poster bytes for review and preserve direct media URLs for confirm-time transfer. They do not persist browser cookies, authorization headers, CSRF tokens, or session fields.
 
 The unpacked Session Helper extension remains available as a fallback:
 
@@ -135,9 +135,9 @@ Example:
 }
 ```
 
-The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The helper path creates a video preview candidate and a selectable poster image candidate. Full Instagram original downloading remains deferred to a future confirm-time downloader.
+The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The helper path creates a video preview candidate and a selectable poster image candidate. If a selected video candidate has a direct `download_url`, the ingress job streams it into `vault/downloads/<source>/` and imports it into the raw vault.
 
-If a helper video candidate is selected before the original transfer path exists, the ingress job completes with that item counted as **Deferred** instead of failed. Poster-image candidates with cached local previews still import immediately.
+If a helper video candidate is selected before a direct original URL exists, the ingress job completes with that item counted as **Deferred** instead of failed. Poster-image candidates with cached local previews still import immediately.
 
 ## Legacy Direct Import API
 

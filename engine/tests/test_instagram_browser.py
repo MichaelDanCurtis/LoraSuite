@@ -80,6 +80,18 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
                         "original_width": 720,
                         "original_height": 1280,
                         "video_duration": 12.75,
+                        "video_versions": [
+                            {
+                                "url": "https://cdninstagram.example/reel-small.mp4",
+                                "width": 360,
+                                "height": 640,
+                            },
+                            {
+                                "url": "https://cdninstagram.example/reel-large.mp4",
+                                "width": 720,
+                                "height": 1280,
+                            },
+                        ],
                         "image_versions2": {
                             "candidates": [
                                 {
@@ -127,7 +139,7 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     assert Path(video.poster_asset_path).exists()
     assert video.metadata_json["browser_source"] == "chrome"
     assert video.metadata_json["extractor"] == "instagram-web-api"
-    assert video.metadata_json["download_url"] is None
+    assert video.metadata_json["download_url"] == "https://cdninstagram.example/reel-large.mp4"
     assert poster.media_type == MediaType.IMAGE
     assert poster.selected is True
 

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
+import lorasuite_engine.ingress as ingress_module
 from lorasuite_engine.ingress import IngressService
 from lorasuite_engine.models import (
     AssetType,
@@ -140,7 +141,7 @@ def test_ingress_job_imports_cached_social_poster_candidate(tmp_path):
     assert completed.imported_media_items[0].metadata_json["original_path"] == str(poster)
 
 
-def test_ingress_job_defers_social_video_original_download(tmp_path):
+def test_ingress_job_defers_social_video_original_download_without_direct_url(tmp_path):
     service = IngressService(tmp_path / "vault")
     candidate = IngressCandidate(
         source_kind=SourceKind.INSTAGRAM,
@@ -150,7 +151,6 @@ def test_ingress_job_defers_social_video_original_download(tmp_path):
         duration=9.5,
         selected=True,
         metadata_json={
-            "download_url": "https://cdninstagram.example/video.mp4",
             "helper_version": "lorasuite-session-helper-v0",
             "platform_media_id": "ig_video_1",
         },
@@ -171,8 +171,69 @@ def test_ingress_job_defers_social_video_original_download(tmp_path):
             "media_type": "video",
             "source_kind": "instagram",
             "source_locator": "https://www.instagram.com/reel/example/",
-            "download_url": "https://cdninstagram.example/video.mp4",
+            "download_url": None,
             "source_url": None,
             "reason": "original download requires session helper transfer",
         }
     ]
+
+
+def test_ingress_job_downloads_selected_social_video_original(tmp_path, monkeypatch):
+    video_bytes = b"fake mp4 bytes"
+    service = IngressService(tmp_path / "vault")
+    candidate = IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator="https://www.instagram.com/reel/example/",
+        display_name="example reel",
+        media_type=MediaType.VIDEO,
+        duration=9.5,
+        selected=True,
+        metadata_json={
+            "download_url": "https://cdninstagram.example/video.mp4",
+            "helper_version": "lorasuite-instagram-web-api-v0",
+            "platform_media_id": "ig_video_1",
+        },
+    )
+    service.store_candidates([candidate])
+
+    class FakeHeaders:
+        def get(self, _name: str, _default=None):
+            return str(len(video_bytes))
+
+        def get_content_type(self) -> str:
+            return "video/mp4"
+
+    class FakeResponse:
+        headers = FakeHeaders()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            if getattr(self, "sent", False):
+                return b""
+            self.sent = True
+            return video_bytes
+
+    def fake_urlopen(_request, *, timeout: int, context):
+        assert timeout == 120
+        assert context is not None
+        return FakeResponse()
+
+    monkeypatch.setattr(ingress_module, "urlopen", fake_urlopen)
+
+    job = service.create_job(SourceKind.INSTAGRAM, [candidate.id])
+    completed = service.process_job(job.id)
+
+    assert completed.status == IngressJobStatus.COMPLETE
+    assert completed.imported_count == 1
+    assert completed.failed_count == 0
+    assert completed.deferred_count == 0
+    imported = completed.imported_media_items[0]
+    assert imported.media_type == MediaType.VIDEO
+    assert imported.raw_path.read_bytes() == video_bytes
+    assert imported.metadata_json["original_path"].endswith(f"{candidate.id}.mp4")
+    assert (tmp_path / "vault" / "downloads" / "instagram" / f"{candidate.id}.mp4").read_bytes() == video_bytes

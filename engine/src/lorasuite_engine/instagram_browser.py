@@ -339,6 +339,7 @@ def _media_item_from_instagram_clip(
         "display_name": _instagram_caption_text(entry)
         or (f"Instagram reel {shortcode}" if shortcode else media_id),
         "media_type": media_type,
+        "download_url": _best_instagram_video_url(entry) if media_type == "video" else None,
         "poster_url": thumbnail_url,
         "thumbnail_url": thumbnail_url,
         "poster_data_url": poster_data_url,
@@ -390,6 +391,26 @@ def _best_instagram_thumbnail_url(entry: dict[str, Any]) -> str | None:
     )
     for candidate in sorted_candidates:
         url = candidate.get("url")
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
+def _best_instagram_video_url(entry: dict[str, Any]) -> str | None:
+    video_versions = entry.get("video_versions")
+    if not isinstance(video_versions, list):
+        return None
+
+    sorted_versions = sorted(
+        (version for version in video_versions if isinstance(version, dict)),
+        key=lambda version: (
+            _optional_int(version.get("width")) or 0
+        )
+        * (_optional_int(version.get("height")) or 0),
+        reverse=True,
+    )
+    for version in sorted_versions:
+        url = version.get("url")
         if isinstance(url, str) and url:
             return url
     return None
