@@ -787,7 +787,7 @@ function TileView({
     <div className="candidate-grid">
       {items.map((item) => (
         <article
-          className={candidateReviewClassName("candidate-tile", item)}
+          className="candidate-tile"
           key={item.id}
           aria-label={item.displayName}
         >
@@ -828,7 +828,7 @@ function ListView({
       </thead>
       <tbody>
         {items.map((item) => (
-          <tr className={candidateReviewClassName("", item)} key={item.id}>
+          <tr key={item.id}>
             <td>
               <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
             </td>
@@ -873,7 +873,7 @@ function GalleryView({
   onNext,
 }: GalleryViewProps) {
   return (
-    <div className={candidateReviewClassName("gallery-review", item)}>
+    <div className="gallery-review">
       <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} large />
       <div className="gallery-details">
         <p className="muted">
@@ -1009,7 +1009,7 @@ function VideoPreviewDialog({
   return (
     <div className="video-preview-backdrop">
       <div
-        className="video-preview-dialog"
+        className="video-preview-dialog compact"
         role="dialog"
         aria-modal="true"
         aria-label={`Video preview: ${item.displayName}`}
@@ -1177,12 +1177,6 @@ function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidat
     }
   }
   return [...candidatesById.values()];
-}
-
-function candidateReviewClassName(baseClassName: string, item: CandidateReviewItem): string {
-  return [baseClassName, hasNonOriginalAudio(item) ? "audio-not-original" : ""]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function roleChipClassName(

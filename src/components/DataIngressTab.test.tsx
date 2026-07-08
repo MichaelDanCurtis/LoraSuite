@@ -625,7 +625,7 @@ describe("DataIngressTab", () => {
     const tile = screen.getByRole("article", { name: "reused audio reel" });
     const voiceSelector = screen.getByLabelText("Select as voice: reused audio reel");
 
-    expect(tile).toHaveClass("audio-not-original");
+    expect(tile).not.toHaveClass("audio-not-original");
     expect(voiceSelector.closest(".role-chip")).toHaveClass("audio-ineligible");
     expect(voiceSelector).not.toBeDisabled();
     expect(voiceSelector).not.toBeChecked();
@@ -633,6 +633,30 @@ describe("DataIngressTab", () => {
     await user.click(voiceSelector);
 
     expect(voiceSelector).toBeChecked();
+  });
+
+  it("renders a compact video preview popout", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramVideoCandidate, instagramPosterCandidate, instagramVoiceCandidate],
+        errors: [],
+      }),
+    });
+
+    const { container } = render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+    await user.click(screen.getByRole("button", { name: "Preview video: example reel" }));
+
+    expect(container.querySelector(".video-preview-dialog")).toHaveClass("compact");
   });
 
   it("renders delayed enlarged image previews for thumbnails", async () => {

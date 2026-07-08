@@ -545,22 +545,6 @@ fieldset input {
   background: #ffffff;
 }
 
-.candidate-tile.audio-not-original {
-  border-color: #c4cbc5;
-  background: #f0f2ef;
-}
-
-.candidate-tile.audio-not-original .candidate-thumb,
-.candidate-tile.audio-not-original .candidate-body,
-.candidate-list tr.audio-not-original .candidate-thumb,
-.candidate-list tr.audio-not-original .list-title-cell,
-.candidate-list tr.audio-not-original .path-cell,
-.gallery-review.audio-not-original .candidate-thumb,
-.gallery-review.audio-not-original .gallery-details > :not(.role-selectors, .preview-action, .gallery-controls) {
-  opacity: 0.46;
-  filter: grayscale(0.9);
-}
-
 .candidate-media {
   position: relative;
 }
@@ -864,6 +848,12 @@ fieldset input {
   box-shadow: 0 24px 72px rgb(23 32 38 / 34%);
 }
 
+.video-preview-dialog.compact {
+  width: min(320px, 86vw);
+  max-height: 72vh;
+  padding: 12px;
+}
+
 .video-preview-header {
   display: flex;
   gap: 12px;
@@ -885,7 +875,7 @@ fieldset input {
 
 .video-preview-dialog video {
   width: 100%;
-  min-height: min(70vh, 720px);
+  max-height: min(54vh, 420px);
   border: 1px solid #d7ddd6;
   background: #11181c;
 }
