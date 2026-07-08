@@ -162,7 +162,11 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
         request: IngressJobRequest,
         background_tasks: BackgroundTasks,
     ) -> dict[str, object]:
-        job = ingress_service().create_job(request.source_kind, request.candidate_ids)
+        job = ingress_service().create_job(
+            request.source_kind,
+            request.candidate_ids,
+            request.options,
+        )
         background_tasks.add_task(ingress_service().process_job, job.id)
         return job.model_dump(mode="json")
 

@@ -123,6 +123,7 @@ class IngressJob(BaseModel):
     id: str = Field(default_factory=lambda: new_id("ingress_job"))
     source_kind: SourceKind
     candidate_ids: list[str] = Field(default_factory=list)
+    options: dict[str, Any] = Field(default_factory=dict)
     candidate_count: int = 0
     selected_count: int = 0
     imported_count: int = 0

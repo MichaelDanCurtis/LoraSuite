@@ -50,16 +50,22 @@ function App() {
       </nav>
 
       <section className="workspace-panel" role="tabpanel">
-        {activeTab === "ingress" && (
+        <div hidden={activeTab !== "ingress"}>
           <DataIngressTab
             engine={engine}
             mediaItems={mediaItems}
             onMediaItemsImported={addMediaItems}
           />
-        )}
-        {activeTab === "curate" && <CurateSearchTab mediaItems={mediaItems} />}
-        {activeTab === "video" && <VideoReviewTab mediaItems={mediaItems} />}
-        {activeTab === "exports" && <ExportsTab engine={engine} />}
+        </div>
+        <div hidden={activeTab !== "curate"}>
+          <CurateSearchTab mediaItems={mediaItems} assetUrl={engine.assetUrl} />
+        </div>
+        <div hidden={activeTab !== "video"}>
+          <VideoReviewTab mediaItems={mediaItems} />
+        </div>
+        <div hidden={activeTab !== "exports"}>
+          <ExportsTab engine={engine} />
+        </div>
       </section>
     </main>
   );

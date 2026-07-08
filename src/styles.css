@@ -162,6 +162,9 @@ fieldset legend {
 .form-stack input,
 .form-stack select,
 .form-stack textarea,
+.source-panel > label input,
+.curate-panel input,
+.curate-panel select,
 .field-grid input {
   display: block;
   width: 100%;
@@ -173,7 +176,8 @@ fieldset legend {
   color: #172026;
 }
 
-.form-stack select {
+.form-stack select,
+.curate-panel select {
   min-height: 36px;
 }
 
@@ -261,6 +265,13 @@ fieldset input {
   display: grid;
   gap: 14px;
   padding: 14px;
+}
+
+.source-panel > label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 650;
 }
 
 .panel-header {
@@ -376,6 +387,98 @@ fieldset input {
 .jobs-panel {
   margin-top: 18px;
   padding: 14px;
+}
+
+.curate-workspace {
+  max-width: 1480px;
+}
+
+.curate-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.curate-panel,
+.curate-results {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #d7ddd6;
+  background: #ffffff;
+}
+
+.curate-panel label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.media-card {
+  overflow: hidden;
+  border: 1px solid #d7ddd6;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.media-card.selected {
+  border-color: #225c63;
+  box-shadow: 0 0 0 2px rgb(39 106 114 / 14%);
+}
+
+.media-preview {
+  position: relative;
+  display: grid;
+  aspect-ratio: 3 / 4;
+  place-items: center;
+  overflow: hidden;
+  background: #e7ece8;
+  color: #58666e;
+  font-weight: 750;
+}
+
+.media-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-card-body {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+}
+
+.media-card-body strong {
+  overflow: hidden;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-card-body span,
+.media-card-body p {
+  margin: 0;
+  color: #58666e;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.media-select {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 650;
 }
 
 .candidate-review,
@@ -518,8 +621,9 @@ fieldset input {
 
 .role-chip {
   display: inline-grid;
-  min-width: 25px;
+  min-width: 44px;
   min-height: 25px;
+  padding: 0 7px;
   place-items: center;
   border: 1px solid #bbc7c0;
   border-radius: 999px;
@@ -769,6 +873,10 @@ fieldset input {
   }
 
   .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .curate-layout {
     grid-template-columns: 1fr;
   }
 

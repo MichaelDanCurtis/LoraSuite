@@ -90,10 +90,16 @@ class IngressService:
             stored_candidates[candidate.id] = candidate
         self._write_candidates(stored_candidates)
 
-    def create_job(self, source_kind: SourceKind, candidate_ids: list[str]) -> IngressJob:
+    def create_job(
+        self,
+        source_kind: SourceKind,
+        candidate_ids: list[str],
+        options: dict[str, Any] | None = None,
+    ) -> IngressJob:
         job = IngressJob(
             source_kind=source_kind,
             candidate_ids=candidate_ids,
+            options=options or {},
             candidate_count=len(candidate_ids),
             selected_count=len(candidate_ids),
         )
@@ -150,7 +156,9 @@ class IngressService:
             )
         ]
 
-        import_result = VaultService(self.vault_root).import_local_paths(ready_import_paths)
+        import_result = VaultService(self._destination_root_for_job(job)).import_local_paths(
+            ready_import_paths
+        )
         missing_ids = [
             candidate_id for candidate_id in job.candidate_ids if candidate_id not in candidates
         ]
@@ -228,6 +236,12 @@ class IngressService:
 
     def get_job(self, job_id: str) -> IngressJob | None:
         return self._read_jobs().get(job_id)
+
+    def _destination_root_for_job(self, job: IngressJob) -> Path:
+        destination_root = job.options.get("destination_root")
+        if isinstance(destination_root, str) and destination_root.strip():
+            return Path(destination_root).expanduser()
+        return self.vault_root
 
     def _import_path_for_candidate(self, candidate: IngressCandidate) -> Path | None:
         if candidate.source_kind == SourceKind.LOCAL:

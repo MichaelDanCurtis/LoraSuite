@@ -1,10 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
 describe("App", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows the four workspace tabs", () => {
     render(<App />);
 
@@ -22,6 +26,49 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "Curate / Search" })).toBeInTheDocument();
     expect(screen.getByText("PhotoMapAI-derived curation workspace")).toBeInTheDocument();
+  });
+
+  it("keeps ingress candidates when switching away from data ingress", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "scan_1",
+        candidates: [
+          {
+            id: "candidate_persisted_image",
+            source_kind: "instagram",
+            source_locator: "https://www.instagram.com/p/persisted/",
+            display_name: "persisted candidate",
+            media_type: "image",
+            thumbnail_path: "/tmp/vault/previews/social/persisted.jpg",
+            status: "ready",
+            selected: true,
+          },
+        ],
+        errors: [],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.type(
+      screen.getByLabelText("Instagram URL"),
+      "https://www.instagram.com/marysuecurtis/",
+    );
+    await user.click(screen.getByRole("button", { name: "Scan Instagram" }));
+
+    expect(await screen.findByText("persisted candidate")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Curate / Search" }));
+    expect(screen.getByRole("heading", { name: "Curate / Search" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Data Ingress" }));
+
+    expect(screen.getByText("persisted candidate")).toBeInTheDocument();
   });
 
   it("shows segment intent guidance in video review", async () => {

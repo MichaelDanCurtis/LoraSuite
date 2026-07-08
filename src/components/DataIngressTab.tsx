@@ -51,6 +51,7 @@ export function DataIngressTab({
   const [jobs, setJobs] = useState<IngressJob[]>([]);
   const [showInstagramHelper, setShowInstagramHelper] = useState(false);
   const [showAdvancedFallbacks, setShowAdvancedFallbacks] = useState(false);
+  const [mediaDestination, setMediaDestination] = useState("");
   const [instagramUrl, setInstagramUrl] = useState("");
   const [instagramBrowser, setInstagramBrowser] = useState("chrome");
   const [instagramScanLimit, setInstagramScanLimit] = useState("24");
@@ -277,9 +278,17 @@ export function DataIngressTab({
 
     setStatus("Creating ingress job.");
     try {
+      const destinationRoot = mediaDestination.trim();
       const job = await engine.createIngressJob({
         source_kind: sourceKind,
         candidate_ids: candidateIds,
+        ...(destinationRoot
+          ? {
+              options: {
+                destination_root: destinationRoot,
+              },
+            }
+          : {}),
       });
       setJobs((currentJobs) => upsertJob(currentJobs, job));
       const completedJob = await waitForJob(job.id);
@@ -404,6 +413,15 @@ export function DataIngressTab({
               X
             </button>
           </div>
+          <label htmlFor="media-destination">
+            Media destination
+            <input
+              id="media-destination"
+              value={mediaDestination}
+              onChange={(event) => setMediaDestination(event.target.value)}
+              placeholder="Default LoraSuite vault"
+            />
+          </label>
 
           {showInstagramHelper && (
             <div className="form-stack helper-payload-panel">
@@ -1110,9 +1128,7 @@ function roleLabel(role: CandidateRole): string {
 }
 
 function compactRoleLabel(role: CandidateRole): string {
-  if (role === "image") return "I";
-  if (role === "video") return "V";
-  return "Voice";
+  return roleLabel(role);
 }
 
 function reviewItemSummary(item: CandidateReviewItem): string {

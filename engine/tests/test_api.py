@@ -360,6 +360,30 @@ def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):
     )
 
 
+def test_ingress_job_endpoint_imports_to_requested_destination_root(client, tmp_path):
+    image_path = tmp_path / "destination-image.png"
+    destination_root = tmp_path / "custom-vault"
+    Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
+    scan = client.post("/ingress/local/scan", json={"roots": [str(image_path)]}).json()
+    candidate_id = scan["candidates"][0]["id"]
+
+    response = client.post(
+        "/ingress/jobs",
+        json={
+            "source_kind": "local",
+            "candidate_ids": [candidate_id],
+            "options": {"destination_root": str(destination_root)},
+        },
+    )
+
+    assert response.status_code == 200
+    job = response.json()
+    detail = client.get(f"/ingress/jobs/{job['id']}").json()
+    imported_path = Path(detail["imported_media_items"][0]["raw_path"])
+    assert imported_path.is_relative_to(destination_root)
+    assert imported_path.exists()
+
+
 def test_ingress_jobs_endpoint_lists_recent_jobs(client, tmp_path):
     image_path = tmp_path / "listed-image.png"
     Image.new("RGB", (12, 14), color=(10, 20, 30)).save(image_path)

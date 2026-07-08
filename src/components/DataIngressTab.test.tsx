@@ -134,9 +134,9 @@ describe("DataIngressTab", () => {
     const tile = screen.getByRole("article", { name: "example reel" });
     expect(within(tile).getByText("720x1280")).toHaveClass("thumb-meta");
     expect(within(tile).getAllByText("ready")[0]).toHaveClass("thumb-status");
-    expect(within(tile).getByText("I")).toHaveClass("role-chip-label");
-    expect(within(tile).getByText("V")).toHaveClass("role-chip-label");
-    expect(within(tile).getByText("Voice")).toHaveClass("role-chip-label");
+    expect(within(tile).getByText("image")).toHaveClass("role-chip-label");
+    expect(within(tile).getByText("video")).toHaveClass("role-chip-label");
+    expect(within(tile).getByText("voice")).toHaveClass("role-chip-label");
     expect(within(tile).queryByText("Select as image")).not.toBeInTheDocument();
     expect(container.querySelector(".role-statuses")).toBeNull();
   });
@@ -180,6 +180,61 @@ describe("DataIngressTab", () => {
     expect(screen.getByLabelText("Select as image: example reel")).not.toBeChecked();
     expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
     expect(screen.getByLabelText("Select as voice: example reel")).toBeChecked();
+  });
+
+  it("sends the selected media destination with the ingress job", async () => {
+    const user = userEvent.setup();
+    const completedJob = {
+      id: "job_1",
+      source_kind: "instagram",
+      candidate_ids: [instagramPosterCandidate.id],
+      candidate_count: 1,
+      selected_count: 1,
+      imported_count: 1,
+      deferred_count: 0,
+      skipped_count: 0,
+      failed_count: 0,
+      status: "complete",
+      progress_message: "Ingress complete",
+      errors: [],
+      deferred_candidates: [],
+      imported_media_items: [],
+      created_at: "2026-07-08T00:00:00Z",
+    } as IngressJob;
+    const createIngressJob = vi.fn().mockResolvedValue({
+      ...completedJob,
+      status: "queued",
+      progress_message: "Queued",
+    });
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramPosterCandidate],
+        errors: [],
+      }),
+      createIngressJob,
+      getIngressJob: vi.fn().mockResolvedValue(completedJob),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+    await user.type(screen.getByLabelText("Media destination"), "/Volumes/Training/MarySue");
+    await user.click(screen.getByRole("button", { name: "Confirm Ingest" }));
+
+    expect(createIngressJob).toHaveBeenCalledWith({
+      source_kind: "instagram",
+      candidate_ids: [instagramPosterCandidate.id],
+      options: {
+        destination_root: "/Volumes/Training/MarySue",
+      },
+    });
   });
 
   it("sends the selected Instagram scan limit to the engine", async () => {
