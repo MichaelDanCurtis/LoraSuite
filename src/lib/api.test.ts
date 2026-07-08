@@ -81,6 +81,25 @@ describe("createEngineClient", () => {
     });
   });
 
+  it("lists stored ingress candidates by source", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [], errors: [] }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+
+    await client.listIngressCandidates("instagram");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://engine.test/ingress/candidates?source_kind=instagram",
+      {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  });
+
   it("creates an ingress job", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

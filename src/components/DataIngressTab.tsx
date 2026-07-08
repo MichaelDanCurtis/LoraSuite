@@ -91,15 +91,7 @@ export function DataIngressTab({
     setStatus("Scanning local media.");
     try {
       const result = await engine.scanLocalIngress(paths, true);
-      setCandidates(result.candidates);
-      setSelectedIds(
-        new Set(
-          result.candidates
-            .filter((candidate) => candidate.status === "ready" && candidate.selected)
-            .map((candidate) => candidate.id),
-        ),
-      );
-      setGalleryIndex(0);
+      applyScanResult(result.candidates);
       setStatus(
         `Scanned ${result.candidates.length} candidate(s). ${result.errors.length} root error(s).`,
       );
@@ -113,19 +105,34 @@ export function DataIngressTab({
       const payload = JSON.parse(instagramPayloadText) as Record<string, unknown>;
       setStatus("Scanning Instagram helper payload.");
       const result = await engine.scanInstagramHelperPayload(payload, true);
-      setCandidates(result.candidates);
-      setSelectedIds(
-        new Set(
-          result.candidates
-            .filter((candidate) => candidate.status === "ready" && candidate.selected)
-            .map((candidate) => candidate.id),
-        ),
-      );
-      setGalleryIndex(0);
+      applyScanResult(result.candidates);
       setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Instagram helper scan failed.");
     }
+  }
+
+  async function loadInstagramHelperCandidates() {
+    try {
+      setStatus("Loading Instagram helper candidates.");
+      const result = await engine.listIngressCandidates("instagram");
+      applyScanResult(result.candidates);
+      setStatus(`Loaded ${result.candidates.length} Instagram helper candidate(s).`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Candidate load failed.");
+    }
+  }
+
+  function applyScanResult(nextCandidates: IngressCandidate[]) {
+    setCandidates(nextCandidates);
+    setSelectedIds(
+      new Set(
+        nextCandidates
+          .filter((candidate) => candidate.status === "ready" && candidate.selected)
+          .map((candidate) => candidate.id),
+      ),
+    );
+    setGalleryIndex(0);
   }
 
   async function confirmIngest() {
@@ -268,6 +275,9 @@ export function DataIngressTab({
           />
           <button type="button" onClick={scanInstagramHelperPayload}>
             Scan Instagram Helper Payload
+          </button>
+          <button type="button" onClick={loadInstagramHelperCandidates}>
+            Load Helper Candidates
           </button>
         </div>
       )}

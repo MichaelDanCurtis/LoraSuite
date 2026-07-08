@@ -74,6 +74,7 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: "Scan Instagram Helper Payload" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load Helper Candidates" })).toBeInTheDocument();
   });
 
   it("switches local ingress review modes", async () => {

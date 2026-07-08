@@ -5,6 +5,7 @@ import type {
   IngressScanResult,
   LocalImportResponse,
   RunComfyExportRequest,
+  SourceKind,
 } from "./types";
 
 interface EngineResponse {
@@ -23,6 +24,7 @@ export interface EngineClient {
     payload: Record<string, unknown>,
     includeVideoPostersAsImageCandidates?: boolean,
   ): Promise<IngressScanResult>;
+  listIngressCandidates(sourceKind?: SourceKind): Promise<IngressScanResult>;
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
   listIngressJobs(): Promise<IngressJob[]>;
   getIngressJob(jobId: string): Promise<IngressJob>;
@@ -80,6 +82,10 @@ export function createEngineClient(
         payload,
         include_video_posters_as_image_candidates: includeVideoPostersAsImageCandidates,
       });
+    },
+    listIngressCandidates(sourceKind?: SourceKind) {
+      const query = sourceKind ? `?source_kind=${encodeURIComponent(sourceKind)}` : "";
+      return getJson<IngressScanResult>(`/ingress/candidates${query}`);
     },
     createIngressJob(request: CreateIngressJobRequest) {
       return postJson<IngressJob>("/ingress/jobs", request);
