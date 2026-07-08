@@ -99,6 +99,16 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
         ingress_service().store_candidates(result.candidates)
         return result.model_dump(mode="json")
 
+    @app.get("/ingress/candidates")
+    def list_ingress_candidates(source_kind: SourceKind | None = None) -> dict[str, object]:
+        candidates = ingress_service().list_candidates(source_kind)
+        return {
+            "candidates": [
+                candidate.model_dump(mode="json") for candidate in candidates
+            ],
+            "errors": [],
+        }
+
     @app.post("/ingress/jobs")
     def create_ingress_job(
         request: IngressJobRequest,

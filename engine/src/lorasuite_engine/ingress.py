@@ -156,6 +156,18 @@ class IngressService:
             reverse=True,
         )
 
+    def list_candidates(
+        self, source_kind: SourceKind | None = None
+    ) -> list[IngressCandidate]:
+        candidates = list(self._read_candidates().values())
+        if source_kind is not None:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.source_kind == source_kind
+            ]
+        return sorted(candidates, key=lambda candidate: candidate.display_name.lower())
+
     def get_job(self, job_id: str) -> IngressJob | None:
         return self._read_jobs().get(job_id)
 

@@ -220,6 +220,42 @@ def test_instagram_helper_scan_endpoint_stores_poster_candidates_for_jobs(
     )
 
 
+def test_ingress_candidates_endpoint_filters_instagram_candidates(client, tmp_path):
+    local_image = tmp_path / "local-candidate.png"
+    Image.new("RGB", (12, 18), color=(10, 40, 90)).save(local_image)
+    client.post("/ingress/local/scan", json={"roots": [str(local_image)]})
+
+    poster = tmp_path / "instagram-poster.jpg"
+    Image.new("RGB", (44, 66), color=(30, 120, 80)).save(poster)
+    client.post(
+        "/ingress/instagram/helper-scan",
+        json={
+            "payload": {
+                "helper_version": "fixture",
+                "media": [
+                    {
+                        "id": "ig_filter_video",
+                        "source_url": "https://www.instagram.com/reel/filter/",
+                        "display_name": "filter reel",
+                        "media_type": "video",
+                        "poster_path": str(poster),
+                    }
+                ],
+            }
+        },
+    )
+
+    response = client.get("/ingress/candidates", params={"source_kind": "instagram"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["candidates"]) == 2
+    assert {candidate["source_kind"] for candidate in body["candidates"]} == {
+        "instagram"
+    }
+    assert body["errors"] == []
+
+
 def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):
     image_path = tmp_path / "job-image.png"
     Image.new("RGB", (31, 37), color=(80, 90, 100)).save(image_path)
