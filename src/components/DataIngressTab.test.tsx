@@ -80,7 +80,7 @@ describe("DataIngressTab", () => {
       screen.getByLabelText("Instagram URL"),
       "https://www.instagram.com/marysuecurtis/reels/",
     );
-    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+    await user.click(screen.getByRole("button", { name: "Scan Instagram" }));
   }
 
   it("groups Instagram reel poster candidates under separate image and video selectors", async () => {
@@ -176,13 +176,53 @@ describe("DataIngressTab", () => {
     );
     await user.clear(screen.getByLabelText("Scan limit"));
     await user.type(screen.getByLabelText("Scan limit"), "8");
-    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+    await user.click(screen.getByRole("button", { name: "Scan Instagram" }));
 
     expect(scanInstagramBrowserUrl).toHaveBeenCalledWith(
       "https://www.instagram.com/marysuecurtis/reels/",
       "chrome",
       8,
       undefined,
+      "all",
+    );
+  });
+
+  it("sends the selected Instagram scan target to the engine", async () => {
+    const user = userEvent.setup();
+    const scanInstagramBrowserUrl = vi.fn().mockResolvedValue({
+      id: "scan_1",
+      candidates: [],
+      errors: [],
+    });
+    const engine = engineWith({ scanInstagramBrowserUrl });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.type(
+      screen.getByLabelText("Instagram URL"),
+      "https://www.instagram.com/marysuecurtis/",
+    );
+    const scanTarget = screen.getByRole("group", { name: "Scan target" });
+    expect(within(scanTarget).getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(scanTarget).getByRole("button", { name: "Reels" }));
+    await user.click(screen.getByRole("button", { name: "Scan Instagram" }));
+
+    expect(scanInstagramBrowserUrl).toHaveBeenCalledWith(
+      "https://www.instagram.com/marysuecurtis/",
+      "chrome",
+      24,
+      undefined,
+      "reels",
     );
   });
 
@@ -270,7 +310,7 @@ describe("DataIngressTab", () => {
     );
     await user.clear(screen.getByLabelText("Scan limit"));
     await user.type(screen.getByLabelText("Scan limit"), "2");
-    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+    await user.click(screen.getByRole("button", { name: "Scan Instagram" }));
     await user.click(await screen.findByLabelText("Select as image: first batch image"));
     await user.click(screen.getByRole("button", { name: "Next Batch" }));
 
@@ -281,6 +321,7 @@ describe("DataIngressTab", () => {
       "chrome",
       2,
       "cursor_2",
+      "all",
     );
 
     await user.click(screen.getByRole("button", { name: "Confirm Ingest" }));
@@ -361,7 +402,7 @@ describe("DataIngressTab", () => {
 
     expect(screen.getByLabelText("Instagram URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Browser cookies")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Scan Instagram URL" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan Instagram" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Instagram helper payload")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Manual path fallback")).not.toBeInTheDocument();
 

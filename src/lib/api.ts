@@ -1,6 +1,7 @@
 import type {
   CreateIngressJobRequest,
   ExportPackage,
+  InstagramScanMode,
   IngressJob,
   IngressScanResult,
   LocalImportResponse,
@@ -29,6 +30,7 @@ export interface EngineClient {
     browser?: string,
     limit?: number,
     cursor?: string,
+    scanMode?: InstagramScanMode,
   ): Promise<IngressScanResult>;
   listIngressCandidates(sourceKind?: SourceKind): Promise<IngressScanResult>;
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
@@ -90,12 +92,19 @@ export function createEngineClient(
         include_video_posters_as_image_candidates: includeVideoPostersAsImageCandidates,
       });
     },
-    scanInstagramBrowserUrl(url: string, browser = "chrome", limit = 24, cursor?: string) {
+    scanInstagramBrowserUrl(
+      url: string,
+      browser = "chrome",
+      limit = 24,
+      cursor?: string,
+      scanMode: InstagramScanMode = "all",
+    ) {
       return postJson<IngressScanResult>("/ingress/instagram/browser-scan", {
         url,
         browser,
         limit,
         cursor,
+        scan_mode: scanMode,
       });
     },
     listIngressCandidates(sourceKind?: SourceKind) {

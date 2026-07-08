@@ -2,7 +2,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 
 import type { EngineClient } from "../lib/api";
-import type { IngressCandidate, IngressJob, IngressScanResult, MediaItem } from "../lib/types";
+import type {
+  IngressCandidate,
+  IngressJob,
+  IngressScanResult,
+  InstagramScanMode,
+  MediaItem,
+} from "../lib/types";
 
 type ViewMode = "tile" | "list" | "gallery";
 type MediaFilter = "all" | "image" | "video" | "audio";
@@ -26,6 +32,7 @@ interface DataIngressTabProps {
 }
 
 const viewModes: ViewMode[] = ["tile", "list", "gallery"];
+const instagramScanModes: InstagramScanMode[] = ["all", "feed", "reels", "tagged"];
 const browserCookieSources = ["chrome", "brave", "chromium", "edge", "firefox", "safari"] as const;
 
 export function DataIngressTab({
@@ -47,6 +54,7 @@ export function DataIngressTab({
   const [instagramUrl, setInstagramUrl] = useState("");
   const [instagramBrowser, setInstagramBrowser] = useState("chrome");
   const [instagramScanLimit, setInstagramScanLimit] = useState("24");
+  const [instagramScanMode, setInstagramScanMode] = useState<InstagramScanMode>("all");
   const [instagramNextCursor, setInstagramNextCursor] = useState<string | undefined>();
   const [instagramBatchNumber, setInstagramBatchNumber] = useState(0);
   const [videoPreviewItem, setVideoPreviewItem] = useState<CandidateReviewItem | null>(null);
@@ -159,12 +167,13 @@ export function DataIngressTab({
     }
 
     try {
-      setStatus("Scanning Instagram URL with browser cookies.");
+      setStatus("Scanning Instagram with browser cookies.");
       const result = await engine.scanInstagramBrowserUrl(
         url,
         instagramBrowser,
         scanLimit,
         undefined,
+        instagramScanMode,
       );
       applyScanResult(result.candidates, { append: false });
       applyInstagramBatchMetadata(result, { append: false });
@@ -189,6 +198,7 @@ export function DataIngressTab({
         instagramBrowser,
         scanLimit,
         instagramNextCursor,
+        instagramScanMode,
       );
       applyScanResult(result.candidates, { append: true });
       applyInstagramBatchMetadata(result, { append: true });
@@ -417,8 +427,27 @@ export function DataIngressTab({
             value={instagramScanLimit}
             onChange={(event) => setInstagramScanLimit(event.target.value)}
           />
+          <div className="scan-target-field">
+            <span id="instagram-scan-mode-label">Scan target</span>
+            <div
+              className="segmented-control"
+              role="group"
+              aria-labelledby="instagram-scan-mode-label"
+            >
+              {instagramScanModes.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={instagramScanMode === mode}
+                  onClick={() => setInstagramScanMode(mode)}
+                >
+                  {instagramScanModeLabel(mode)}
+                </button>
+              ))}
+            </div>
+          </div>
           <button type="button" onClick={scanInstagramBrowserUrl}>
-            Scan Instagram URL
+            Scan Instagram
           </button>
           <button type="button" onClick={() => setShowAdvancedFallbacks((visible) => !visible)}>
             Advanced Fallbacks
@@ -922,6 +951,10 @@ function StatusBadge({ candidate }: { candidate: IngressCandidate }) {
 }
 
 function modeLabel(mode: ViewMode): string {
+  return mode[0].toUpperCase() + mode.slice(1);
+}
+
+function instagramScanModeLabel(mode: InstagramScanMode): string {
   return mode[0].toUpperCase() + mode.slice(1);
 }
 

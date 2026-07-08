@@ -94,6 +94,7 @@ describe("createEngineClient", () => {
       "chrome",
       8,
       "cursor_2",
+      "tagged",
     );
 
     expect(fetchMock).toHaveBeenCalledWith("http://engine.test/ingress/instagram/browser-scan", {
@@ -104,6 +105,7 @@ describe("createEngineClient", () => {
         browser: "chrome",
         limit: 8,
         cursor: "cursor_2",
+        scan_mode: "tagged",
       }),
     });
   });

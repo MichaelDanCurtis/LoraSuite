@@ -301,11 +301,12 @@ def test_ingress_candidates_endpoint_filters_instagram_candidates(client, tmp_pa
 def test_instagram_browser_scan_endpoint_stores_thumbnail_candidates(
     client, monkeypatch
 ):
-    def fake_scan(url, vault_root, *, browser, limit, cursor):
+    def fake_scan(url, vault_root, *, browser, limit, cursor, scan_mode):
         assert url == "https://www.instagram.com/reel/browser/"
         assert browser == "chrome"
         assert limit == 8
         assert cursor == "cursor_2"
+        assert scan_mode == "tagged"
         return IngressScanResult(
             candidates=[
                 IngressCandidate(
@@ -327,6 +328,7 @@ def test_instagram_browser_scan_endpoint_stores_thumbnail_candidates(
             "browser": "chrome",
             "limit": 8,
             "cursor": "cursor_2",
+            "scan_mode": "tagged",
         },
     )
 

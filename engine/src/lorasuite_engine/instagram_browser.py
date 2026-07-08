@@ -6,7 +6,7 @@ from binascii import Error as BinasciiError
 from base64 import b64decode, b64encode
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import (
@@ -25,12 +25,16 @@ from lorasuite_engine.social_helper import scan_instagram_helper_payload
 MetadataExtractor = Callable[[str, str], dict[str, Any]]
 ProfileFetcher = Callable[[str, str], dict[str, Any]]
 ProfilePageFetcher = Callable[[str, str, int, str | None], dict[str, Any]]
-ProfileReelsFetcher = Callable[[str, str, int], dict[str, Any]]
+ProfileReelsFetcher = Callable[[str, str, int, str | None], dict[str, Any]]
+ProfileTaggedFetcher = Callable[[str, str, int, str | None], dict[str, Any]]
 ThumbnailFetcher = Callable[[str], tuple[bytes, str]]
+InstagramScanMode = Literal["all", "feed", "reels", "tagged"]
 
 INSTAGRAM_WEB_APP_ID = "936619743392459"
+INSTAGRAM_TAGGED_QUERY_HASH = "ff260833edf142911047af6024eb634a"
 PROFILE_REELS_PAGE_SIZE = 24
 MAX_PROFILE_REELS_PAGE_SIZE = 100
+SUPPORTED_INSTAGRAM_SCAN_MODES = frozenset({"all", "feed", "reels", "tagged"})
 SUPPORTED_BROWSER_COOKIE_SOURCES = frozenset(
     {"brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi"}
 )
@@ -54,72 +58,37 @@ def scan_instagram_url_with_browser_cookies(
     profile_fetcher: ProfileFetcher | None = None,
     profile_page_fetcher: ProfilePageFetcher | None = None,
     profile_reels_fetcher: ProfileReelsFetcher | None = None,
+    profile_tagged_fetcher: ProfileTaggedFetcher | None = None,
     thumbnail_fetcher: ThumbnailFetcher | None = None,
     limit: int = PROFILE_REELS_PAGE_SIZE,
     cursor: str | None = None,
+    scan_mode: InstagramScanMode = "all",
 ) -> IngressScanResult:
     normalized_url = _validate_instagram_url(url)
     normalized_browser = _validate_browser(browser)
     scan_limit = _validate_scan_limit(limit)
+    normalized_scan_mode = _validate_scan_mode(scan_mode)
     cursor_state = _decode_scan_cursor(cursor)
     extractor = metadata_extractor or _extract_metadata_with_ytdlp
     profile_fetcher_impl = profile_fetcher or _fetch_profile_with_browser_cookies
     profile_page_fetcher_impl = profile_page_fetcher or _fetch_profile_page_with_browser_cookies
     reels_fetcher = profile_reels_fetcher or _fetch_profile_reels_with_browser_cookies
+    tagged_fetcher = profile_tagged_fetcher or _fetch_profile_tagged_with_browser_cookies
     fetcher = thumbnail_fetcher or _fetch_thumbnail
 
-    profile_reels_username = _profile_reels_username(normalized_url)
-    if profile_reels_username is not None:
-        if profile_page_fetcher is not None or (
-            profile_fetcher is None and profile_reels_fetcher is None
-        ):
-            return _scan_instagram_profile_page(
-                profile_reels_username,
-                vault_root,
-                browser=normalized_browser,
-                limit=scan_limit,
-                cursor_state=cursor_state,
-                profile_page_fetcher=profile_page_fetcher_impl,
-                thumbnail_fetcher=fetcher,
-            )
-        profile_metadata = profile_fetcher_impl(profile_reels_username, normalized_browser)
-        reels_metadata = reels_fetcher(
-            profile_reels_username,
-            normalized_browser,
-            scan_limit,
-        )
-        payload = _helper_payload_from_instagram_profile_payload(
-            profile_metadata,
-            reels_metadata,
-            browser=normalized_browser,
-            thumbnail_fetcher=fetcher,
-            limit=scan_limit,
-        )
-    elif (profile_username := _profile_username(normalized_url)) is not None:
-        if profile_page_fetcher is not None or (
-            profile_fetcher is None and profile_reels_fetcher is None
-        ):
-            return _scan_instagram_profile_page(
-                profile_username,
-                vault_root,
-                browser=normalized_browser,
-                limit=scan_limit,
-                cursor_state=cursor_state,
-                profile_page_fetcher=profile_page_fetcher_impl,
-                thumbnail_fetcher=fetcher,
-            )
-        profile_metadata = profile_fetcher_impl(profile_username, normalized_browser)
-        reels_metadata = reels_fetcher(
+    if (profile_username := _profile_surface_username(normalized_url)) is not None:
+        return _scan_instagram_profile_surfaces(
             profile_username,
-            normalized_browser,
-            scan_limit,
-        )
-        payload = _helper_payload_from_instagram_profile_payload(
-            profile_metadata,
-            reels_metadata,
+            vault_root,
             browser=normalized_browser,
-            thumbnail_fetcher=fetcher,
             limit=scan_limit,
+            cursor_state=cursor_state,
+            scan_mode=normalized_scan_mode,
+            profile_fetcher=profile_fetcher_impl if profile_fetcher is not None else None,
+            profile_page_fetcher=profile_page_fetcher_impl,
+            profile_reels_fetcher=reels_fetcher,
+            profile_tagged_fetcher=tagged_fetcher,
+            thumbnail_fetcher=fetcher,
         )
     else:
         metadata = extractor(normalized_url, normalized_browser)
@@ -131,32 +100,109 @@ def scan_instagram_url_with_browser_cookies(
     return scan_instagram_helper_payload(payload, vault_root)
 
 
-def _scan_instagram_profile_page(
+def _scan_instagram_profile_surfaces(
     username: str,
     vault_root: Path,
     *,
     browser: str,
     limit: int,
     cursor_state: dict[str, str],
+    scan_mode: InstagramScanMode,
+    profile_fetcher: ProfileFetcher | None,
     profile_page_fetcher: ProfilePageFetcher,
+    profile_reels_fetcher: ProfileReelsFetcher,
+    profile_tagged_fetcher: ProfileTaggedFetcher,
     thumbnail_fetcher: ThumbnailFetcher,
 ) -> IngressScanResult:
-    profile_metadata = profile_page_fetcher(
-        username,
-        browser,
-        limit,
-        cursor_state.get("profile"),
-    )
-    payload = _helper_payload_from_instagram_profile_payload(
-        profile_metadata,
-        {"items": []},
-        browser=browser,
-        thumbnail_fetcher=thumbnail_fetcher,
-        limit=limit,
-    )
+    is_continuation = bool(cursor_state)
+    payload_media: list[dict[str, Any]] = []
+    metadata_by_surface: dict[str, dict[str, Any]] = {}
+
+    if _should_fetch_surface(scan_mode, "feed", cursor_state, is_continuation):
+        profile_metadata = _fetch_feed_surface(
+            username,
+            browser,
+            limit,
+            cursor_state.get("feed") or cursor_state.get("profile"),
+            profile_fetcher=profile_fetcher,
+            profile_page_fetcher=profile_page_fetcher,
+        )
+        metadata_by_surface["feed"] = profile_metadata
+        feed_payload = _helper_payload_from_instagram_profile_payload(
+            profile_metadata,
+            {"items": []},
+            browser=browser,
+            thumbnail_fetcher=thumbnail_fetcher,
+            limit=limit,
+        )
+        payload_media.extend(feed_payload["media"])
+
+    if _should_fetch_surface(scan_mode, "reels", cursor_state, is_continuation):
+        reels_metadata = profile_reels_fetcher(
+            username,
+            browser,
+            limit,
+            cursor_state.get("reels"),
+        )
+        metadata_by_surface["reels"] = reels_metadata
+        reels_payload = _helper_payload_from_instagram_clips_payload(
+            reels_metadata,
+            browser=browser,
+            thumbnail_fetcher=thumbnail_fetcher,
+        )
+        payload_media.extend(reels_payload["media"])
+
+    if _should_fetch_surface(scan_mode, "tagged", cursor_state, is_continuation):
+        tagged_metadata = profile_tagged_fetcher(
+            username,
+            browser,
+            limit,
+            cursor_state.get("tagged"),
+        )
+        metadata_by_surface["tagged"] = tagged_metadata
+        tagged_payload = _helper_payload_from_instagram_profile_payload(
+            tagged_metadata,
+            {"items": []},
+            browser=browser,
+            thumbnail_fetcher=thumbnail_fetcher,
+            limit=limit,
+        )
+        payload_media.extend(tagged_payload["media"])
+
+    payload = {
+        "helper_version": "lorasuite-instagram-web-api-v1",
+        "media": _dedupe_media_items(payload_media),
+    }
     result = scan_instagram_helper_payload(payload, vault_root)
-    result.metadata_json = _profile_pagination_metadata(profile_metadata, limit)
+    result.metadata_json = _profile_pagination_metadata(metadata_by_surface, limit)
     return result
+
+
+def _should_fetch_surface(
+    scan_mode: InstagramScanMode,
+    surface: str,
+    cursor_state: dict[str, str],
+    is_continuation: bool,
+) -> bool:
+    if scan_mode == surface:
+        return True
+    if scan_mode != "all":
+        return False
+    return not is_continuation or surface in cursor_state
+
+
+def _fetch_feed_surface(
+    username: str,
+    browser: str,
+    limit: int,
+    cursor: str | None,
+    *,
+    profile_fetcher: ProfileFetcher | None,
+    profile_page_fetcher: ProfilePageFetcher,
+) -> dict[str, Any]:
+    if profile_fetcher is not None and cursor is None:
+        return profile_fetcher(username, browser)
+    return profile_page_fetcher(username, browser, limit, cursor)
 
 
 def _extract_metadata_with_ytdlp(url: str, browser: str) -> dict[str, Any]:
@@ -280,6 +326,7 @@ def _fetch_profile_reels_with_browser_cookies(
     username: str,
     browser: str,
     page_size: int,
+    cursor: str | None,
 ) -> dict[str, Any]:
     cookie_jar = _extract_browser_cookies(browser)
     opener = build_opener(
@@ -306,14 +353,15 @@ def _fetch_profile_reels_with_browser_cookies(
             f"No Instagram CSRF cookie found in {browser}. Log into Instagram in that browser first."
         )
 
-    form_data = urlencode(
-        {
-            "target_user_id": user_id,
-            "page_size": str(page_size),
-            "include_feed_video": "true",
-            "surface": "grid",
-        }
-    ).encode("utf-8")
+    form_fields = {
+        "target_user_id": user_id,
+        "page_size": str(page_size),
+        "include_feed_video": "true",
+        "surface": "grid",
+    }
+    if cursor:
+        form_fields["max_id"] = cursor
+    form_data = urlencode(form_fields).encode("utf-8")
     return _request_instagram_json(
         opener,
         "https://www.instagram.com/api/v1/clips/user/",
@@ -325,6 +373,47 @@ def _fetch_profile_reels_with_browser_cookies(
             "X-CSRFToken": csrf_token,
         },
         method="POST",
+    )
+
+
+def _fetch_profile_tagged_with_browser_cookies(
+    username: str,
+    browser: str,
+    page_size: int,
+    cursor: str | None,
+) -> dict[str, Any]:
+    cookie_jar = _extract_browser_cookies(browser)
+    opener = build_opener(
+        HTTPCookieProcessor(cookie_jar),
+        HTTPSHandler(context=_ssl_context()),
+    )
+    referer = f"https://www.instagram.com/{username}/tagged/"
+    profile_payload = _request_instagram_json(
+        opener,
+        "https://www.instagram.com/api/v1/users/web_profile_info/?"
+        + urlencode({"username": username}),
+        headers=_instagram_json_headers(referer),
+    )
+    user = ((profile_payload.get("data") or {}).get("user") or {})
+    user_id = str(user.get("id") or "").strip()
+    if not user_id:
+        raise InstagramBrowserScanError(
+            f"Could not resolve Instagram profile: {username}."
+        )
+
+    variables: dict[str, Any] = {"id": user_id, "first": max(2, page_size)}
+    if cursor:
+        variables["after"] = cursor
+    return _request_instagram_json(
+        opener,
+        "https://www.instagram.com/graphql/query/?"
+        + urlencode(
+            {
+                "query_hash": INSTAGRAM_TAGGED_QUERY_HASH,
+                "variables": json.dumps(variables, separators=(",", ":")),
+            }
+        ),
+        headers=_instagram_json_headers(referer),
     )
 
 
@@ -467,7 +556,18 @@ def _iter_instagram_profile_media(metadata: dict[str, Any]) -> list[dict[str, An
         return [item for item in profile_grid_items if isinstance(item, dict)]
 
     user = ((metadata.get("data") or {}).get("user") or {})
-    timeline = user.get("edge_owner_to_timeline_media")
+    for edge_collection_name in (
+        "edge_owner_to_timeline_media",
+        "edge_user_to_photos_of_you",
+    ):
+        timeline = user.get(edge_collection_name)
+        media = _iter_graphql_edge_media(timeline)
+        if media:
+            return media
+    return []
+
+
+def _iter_graphql_edge_media(timeline: Any) -> list[dict[str, Any]]:
     if not isinstance(timeline, dict):
         return []
 
@@ -747,29 +847,62 @@ def _dedupe_media_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _profile_pagination_metadata(
-    metadata: dict[str, Any],
+    metadata_by_surface: dict[str, dict[str, Any]],
     limit: int,
 ) -> dict[str, Any]:
-    next_profile_cursor = _next_profile_cursor(metadata)
+    next_cursor_state = {
+        surface: cursor
+        for surface, metadata in metadata_by_surface.items()
+        if (cursor := _next_profile_cursor(metadata)) is not None
+    }
     pagination: dict[str, Any] = {
         "batch_size": limit,
-        "has_next_batch": next_profile_cursor is not None,
+        "scan_surfaces": list(metadata_by_surface.keys()),
+        "has_next_batch": bool(next_cursor_state),
     }
-    if next_profile_cursor is not None:
-        pagination["next_cursor"] = _encode_scan_cursor(
-            {"profile": next_profile_cursor}
-        )
+    if next_cursor_state:
+        pagination["next_cursor"] = _encode_scan_cursor(next_cursor_state)
     return pagination
 
 
 def _next_profile_cursor(metadata: dict[str, Any]) -> str | None:
-    if metadata.get("more_available") is not True:
-        return None
+    if metadata.get("more_available") is True:
+        for key in ("next_max_id", "profile_grid_items_cursor"):
+            raw_cursor = metadata.get(key)
+            if isinstance(raw_cursor, str) and raw_cursor.strip():
+                return raw_cursor.strip()
 
-    for key in ("next_max_id", "profile_grid_items_cursor"):
-        raw_cursor = metadata.get(key)
+    paging_info = metadata.get("paging_info")
+    if isinstance(paging_info, dict) and paging_info.get("more_available") is True:
+        raw_cursor = paging_info.get("max_id")
         if isinstance(raw_cursor, str) and raw_cursor.strip():
             return raw_cursor.strip()
+
+    page_info = _graphql_page_info(metadata)
+    if isinstance(page_info, dict) and page_info.get("has_next_page") is True:
+        raw_cursor = page_info.get("end_cursor")
+        if isinstance(raw_cursor, str) and raw_cursor.strip():
+            return raw_cursor.strip()
+
+    return None
+
+
+def _graphql_page_info(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    user = ((metadata.get("data") or {}).get("user") or {})
+    for edge_collection_name in (
+        "edge_owner_to_timeline_media",
+        "edge_user_to_photos_of_you",
+    ):
+        timeline = user.get(edge_collection_name)
+        if not isinstance(timeline, dict):
+            continue
+        page_info = timeline.get("page_info")
+        if isinstance(page_info, dict):
+            return page_info
+
+    page_info = metadata.get("page_info")
+    if isinstance(page_info, dict):
+        return page_info
     return None
 
 
@@ -848,6 +981,22 @@ def _profile_reels_username(url: str) -> str | None:
     return None
 
 
+def _profile_tagged_username(url: str) -> str | None:
+    parsed = urlparse(url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) == 2 and parts[1] == "tagged":
+        return parts[0]
+    return None
+
+
+def _profile_surface_username(url: str) -> str | None:
+    return (
+        _profile_reels_username(url)
+        or _profile_tagged_username(url)
+        or _profile_username(url)
+    )
+
+
 def _profile_username(url: str) -> str | None:
     parsed = urlparse(url)
     parts = [part for part in parsed.path.split("/") if part]
@@ -872,8 +1021,20 @@ def _validate_browser(browser: str) -> str:
     normalized = browser.strip().lower()
     if normalized not in SUPPORTED_BROWSER_COOKIE_SOURCES:
         supported = ", ".join(sorted(SUPPORTED_BROWSER_COOKIE_SOURCES))
-        raise InstagramBrowserScanError(f"Unsupported browser cookie source. Use one of: {supported}.")
+        raise InstagramBrowserScanError(
+            f"Unsupported browser cookie source. Use one of: {supported}."
+        )
     return normalized
+
+
+def _validate_scan_mode(scan_mode: str) -> InstagramScanMode:
+    normalized = scan_mode.strip().lower()
+    if normalized not in SUPPORTED_INSTAGRAM_SCAN_MODES:
+        supported = ", ".join(sorted(SUPPORTED_INSTAGRAM_SCAN_MODES))
+        raise InstagramBrowserScanError(
+            f"Unsupported Instagram scan target. Use one of: {supported}."
+        )
+    return cast(InstagramScanMode, normalized)
 
 
 def _validate_scan_limit(limit: int) -> int:

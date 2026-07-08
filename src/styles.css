@@ -178,6 +178,16 @@ fieldset legend {
   min-height: 36px;
 }
 
+.scan-target-field {
+  display: grid;
+  gap: 6px;
+}
+
+.scan-target-field > span {
+  color: #27343b;
+  font-weight: 650;
+}
+
 .primary-action {
   width: fit-content;
   min-height: 38px;

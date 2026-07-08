@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -72,7 +72,12 @@ describe("App", () => {
 
     expect(screen.getByLabelText("Instagram URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Browser cookies")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Scan Instagram URL" })).toBeInTheDocument();
+    const scanTarget = screen.getByRole("group", { name: "Scan target" });
+    expect(within(scanTarget).getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Scan Instagram" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Instagram helper payload")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Manual path fallback")).not.toBeInTheDocument();
 

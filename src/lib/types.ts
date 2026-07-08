@@ -1,5 +1,6 @@
 export type MediaType = "image" | "video" | "audio";
 export type SourceKind = "local" | "instagram" | "x_twitter" | "tiktok";
+export type InstagramScanMode = "all" | "feed" | "reels" | "tagged";
 export type IngressCandidateStatus = "ready" | "duplicate" | "unsupported" | "error";
 export type IngressJobStatus = "queued" | "running" | "complete" | "failed" | "canceled";
 

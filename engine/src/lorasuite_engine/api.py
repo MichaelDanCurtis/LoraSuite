@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +44,7 @@ class InstagramBrowserScanRequest(BaseModel):
     browser: str = "chrome"
     limit: int = Field(default=24, ge=1, le=100)
     cursor: str | None = None
+    scan_mode: Literal["all", "feed", "reels", "tagged"] = "all"
 
 
 class IngressJobRequest(BaseModel):
@@ -139,6 +140,7 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
                 browser=request.browser,
                 limit=request.limit,
                 cursor=request.cursor,
+                scan_mode=request.scan_mode,
             )
         except InstagramBrowserScanError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
