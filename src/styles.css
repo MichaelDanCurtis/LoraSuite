@@ -103,7 +103,7 @@ h2 {
 }
 
 .workspace-panel {
-  padding: 24px 28px;
+  padding: 18px 22px;
 }
 
 .workspace-section {
@@ -111,7 +111,7 @@ h2 {
 }
 
 .ingress-workspace {
-  max-width: 1180px;
+  max-width: 1480px;
 }
 
 .section-header {
@@ -122,13 +122,13 @@ h2 {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(120px, 180px));
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
 }
 
 .metric-grid div {
-  padding: 12px 14px;
+  padding: 9px 10px;
   border: 1px solid #d7ddd6;
   background: #ffffff;
 }
@@ -142,15 +142,14 @@ h2 {
 .metric-grid dd {
   margin: 0;
   color: #172026;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 700;
 }
 
 .form-stack {
   display: grid;
-  gap: 10px;
-  max-width: 680px;
-  margin-bottom: 22px;
+  gap: 9px;
+  max-width: none;
 }
 
 .form-stack label,
@@ -168,7 +167,7 @@ fieldset legend {
   width: 100%;
   box-sizing: border-box;
   margin-top: 6px;
-  padding: 9px 10px;
+  padding: 8px 9px;
   border: 1px solid #bbc7c0;
   background: #ffffff;
   color: #172026;
@@ -201,6 +200,7 @@ fieldset legend {
   min-height: 20px;
   margin: 0;
   color: #58666e;
+  overflow-wrap: anywhere;
 }
 
 .field-grid {
@@ -242,17 +242,59 @@ fieldset input {
   margin: 0;
 }
 
+.ingress-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.source-panel,
+.review-panel,
+.jobs-panel {
+  border: 1px solid #d7ddd6;
+  background: #ffffff;
+}
+
+.source-panel,
+.review-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.panel-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-header h3,
+.panel-header p {
+  margin: 0;
+}
+
+.review-header > button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #bbc7c0;
+  background: #ffffff;
+  color: #172026;
+}
+
 .ingress-actions,
+.source-actions-row,
 .review-toolbar,
 .gallery-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-bottom: 16px;
 }
 
 .ingress-actions button,
+.source-actions-row button,
 .review-toolbar button,
 .manual-ingress button,
 .helper-payload-panel button,
@@ -279,6 +321,13 @@ fieldset input {
 
 .helper-payload-panel {
   max-width: 760px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+  align-items: end;
 }
 
 .advanced-fallbacks {
@@ -310,7 +359,7 @@ fieldset input {
 }
 
 .segmented-control button {
-  min-width: 72px;
+  min-width: 58px;
   border: 0;
   border-right: 1px solid #bbc7c0;
 }
@@ -324,9 +373,9 @@ fieldset input {
   color: #ffffff;
 }
 
-.candidate-review,
 .jobs-panel {
-  margin-top: 22px;
+  margin-top: 18px;
+  padding: 14px;
 }
 
 .candidate-review,
@@ -336,22 +385,26 @@ fieldset input {
 
 .candidate-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
 }
 
 .candidate-tile {
   position: relative;
   overflow: visible;
   border: 1px solid #d7ddd6;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #ffffff;
+}
+
+.candidate-media {
+  position: relative;
 }
 
 .candidate-thumb {
   position: relative;
   display: grid;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 3 / 4;
   place-items: center;
   background: #e7ece8;
   color: #58666e;
@@ -366,6 +419,41 @@ fieldset input {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.thumb-overlay {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.thumb-meta,
+.thumb-status {
+  max-width: 100%;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgb(17 24 28 / 78%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.thumb-status.ready {
+  background: rgb(38 101 60 / 84%);
+}
+
+.thumb-status.error,
+.thumb-status.unsupported {
+  background: rgb(132 45 45 / 86%);
 }
 
 .hover-preview {
@@ -399,31 +487,83 @@ fieldset input {
 
 .candidate-body {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 4px;
+  min-height: 38px;
+  padding: 7px 8px;
 }
 
-.candidate-body label,
-.gallery-details label,
-.role-selectors label {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
+.candidate-body strong {
+  display: block;
+  overflow: hidden;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .role-selectors {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 4px;
+}
+
+.candidate-media > .role-selectors {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.role-chip {
+  display: inline-grid;
+  min-width: 25px;
+  min-height: 25px;
+  place-items: center;
+  border: 1px solid #bbc7c0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 88%);
+  color: #172026;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.role-chip.selected {
+  border-color: #225c63;
+  color: #ffffff;
+  background: rgb(39 106 114 / 92%);
+}
+
+.role-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.role-chip:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .preview-action {
-  width: fit-content;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid #bbc7c0;
-  background: #ffffff;
-  color: #172026;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  min-height: 25px;
+  padding: 0 7px;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 999px;
+  background: rgb(17 24 28 / 74%);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 750;
 }
 
 .role-statuses {
@@ -468,14 +608,27 @@ fieldset input {
 }
 
 .candidate-list .candidate-thumb {
-  width: 64px;
-  height: 64px;
+  width: 58px;
+  height: 72px;
   aspect-ratio: auto;
 }
 
 .candidate-list .role-selectors {
-  display: grid;
-  min-width: 130px;
+  position: static;
+  min-width: 104px;
+}
+
+.candidate-list .preview-action {
+  position: static;
+  margin-left: 4px;
+  color: #172026;
+  background: #ffffff;
+  border-color: #bbc7c0;
+}
+
+.list-title-cell {
+  max-width: 260px;
+  font-weight: 650;
 }
 
 .path-cell {
@@ -505,6 +658,18 @@ fieldset input {
 .gallery-details p {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.gallery-details .role-selectors {
+  position: static;
+}
+
+.gallery-details .preview-action {
+  position: static;
+  width: fit-content;
+  color: #172026;
+  background: #ffffff;
+  border-color: #bbc7c0;
 }
 
 .video-preview-backdrop {
@@ -597,6 +762,14 @@ fieldset input {
 @media (max-width: 760px) {
   .workspace-panel {
     padding: 18px 16px;
+  }
+
+  .ingress-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
+    grid-template-columns: 1fr;
   }
 
   .gallery-review {

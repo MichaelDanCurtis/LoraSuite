@@ -381,244 +381,283 @@ export function DataIngressTab({
         <p>Scan local media, review candidates, then confirm only what should enter the vault.</p>
       </div>
 
-      <div className="ingress-actions" aria-label="Ingress source actions">
-        <button className="primary-action" type="button" onClick={chooseFiles}>
-          Choose Files
-        </button>
-        <button type="button" onClick={chooseFolder}>
-          Choose Folder
-        </button>
-        <button type="button" onClick={() => setShowInstagramHelper((visible) => !visible)}>
-          Instagram Source
-        </button>
-        <button type="button" disabled>
-          X Source
-        </button>
-      </div>
-
-      {showInstagramHelper && (
-        <div className="form-stack helper-payload-panel">
-          <label htmlFor="instagram-url">Instagram URL</label>
-          <input
-            id="instagram-url"
-            value={instagramUrl}
-            onChange={(event) => setInstagramUrl(event.target.value)}
-            placeholder="https://www.instagram.com/reel/..."
-          />
-          <label htmlFor="instagram-browser">Browser cookies</label>
-          <select
-            id="instagram-browser"
-            value={instagramBrowser}
-            onChange={(event) => setInstagramBrowser(event.target.value)}
-          >
-            {browserCookieSources.map((browser) => (
-              <option key={browser} value={browser}>
-                {browserLabel(browser)}
-              </option>
-            ))}
-          </select>
-          <label htmlFor="instagram-scan-limit">Scan limit</label>
-          <input
-            id="instagram-scan-limit"
-            min="1"
-            max="100"
-            step="1"
-            type="number"
-            value={instagramScanLimit}
-            onChange={(event) => setInstagramScanLimit(event.target.value)}
-          />
-          <div className="scan-target-field">
-            <span id="instagram-scan-mode-label">Scan target</span>
-            <div
-              className="segmented-control"
-              role="group"
-              aria-labelledby="instagram-scan-mode-label"
+      <div className="ingress-layout">
+        <aside className="source-panel" aria-label="Ingress sources">
+          <div className="panel-header">
+            <h3>Sources</h3>
+          </div>
+          <div className="ingress-actions" aria-label="Ingress source actions">
+            <button className="primary-action" type="button" onClick={chooseFiles}>
+              Choose Files
+            </button>
+            <button type="button" onClick={chooseFolder}>
+              Choose Folder
+            </button>
+            <button
+              type="button"
+              aria-label="Instagram Source"
+              onClick={() => setShowInstagramHelper((visible) => !visible)}
             >
-              {instagramScanModes.map((mode) => (
+              Instagram
+            </button>
+            <button type="button" disabled>
+              X
+            </button>
+          </div>
+
+          {showInstagramHelper && (
+            <div className="form-stack helper-payload-panel">
+              <label htmlFor="instagram-url">Instagram URL</label>
+              <input
+                id="instagram-url"
+                value={instagramUrl}
+                onChange={(event) => setInstagramUrl(event.target.value)}
+                placeholder="https://www.instagram.com/reel/..."
+              />
+              <div className="field-row">
+                <label htmlFor="instagram-browser">
+                  Browser cookies
+                  <select
+                    id="instagram-browser"
+                    value={instagramBrowser}
+                    onChange={(event) => setInstagramBrowser(event.target.value)}
+                  >
+                    {browserCookieSources.map((browser) => (
+                      <option key={browser} value={browser}>
+                        {browserLabel(browser)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label htmlFor="instagram-scan-limit">
+                  Scan limit
+                  <input
+                    id="instagram-scan-limit"
+                    min="1"
+                    max="100"
+                    step="1"
+                    type="number"
+                    value={instagramScanLimit}
+                    onChange={(event) => setInstagramScanLimit(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="scan-target-field">
+                <span id="instagram-scan-mode-label">Scan target</span>
+                <div
+                  className="segmented-control"
+                  role="group"
+                  aria-labelledby="instagram-scan-mode-label"
+                >
+                  {instagramScanModes.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={instagramScanMode === mode}
+                      onClick={() => setInstagramScanMode(mode)}
+                    >
+                      {instagramScanModeLabel(mode)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="source-actions-row">
+                <button type="button" onClick={scanInstagramBrowserUrl}>
+                  Scan Instagram
+                </button>
+                <button
+                  type="button"
+                  aria-label="Advanced Fallbacks"
+                  onClick={() => setShowAdvancedFallbacks((visible) => !visible)}
+                >
+                  Advanced
+                </button>
+              </div>
+              {showAdvancedFallbacks && (
+                <div className="advanced-fallbacks">
+                  <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
+                  <textarea
+                    id="instagram-helper-payload"
+                    value={instagramPayloadText}
+                    onChange={(event) => setInstagramPayloadText(event.target.value)}
+                    rows={8}
+                  />
+                  <button type="button" onClick={scanInstagramHelperPayload}>
+                    Scan Instagram Helper Payload
+                  </button>
+                  <button type="button" onClick={loadInstagramHelperCandidates}>
+                    Load Helper Candidates
+                  </button>
+                  <label htmlFor="manual-paths">Manual path fallback</label>
+                  <textarea
+                    id="manual-paths"
+                    value={manualPaths}
+                    onChange={(event) => setManualPaths(event.target.value)}
+                    rows={3}
+                    placeholder="/absolute/path/to/file-or-folder"
+                  />
+                  <button type="button" onClick={scanManualPaths}>
+                    Scan Manual Paths
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <p aria-live="polite" className="status-line">
+            {status}
+          </p>
+
+          <dl className="metric-grid" aria-label="Ingress summary">
+            <div>
+              <dt>Imported</dt>
+              <dd>{mediaItems.length}</dd>
+            </div>
+            <div>
+              <dt>Candidates</dt>
+              <dd>{candidates.length}</dd>
+            </div>
+            <div>
+              <dt>Selected</dt>
+              <dd>{selectedReadyCount}</dd>
+            </div>
+            <div>
+              <dt>Skipped</dt>
+              <dd>{skippedCount}</dd>
+            </div>
+          </dl>
+        </aside>
+
+        <section className="review-panel" aria-label="Candidate review">
+          <div className="panel-header review-header">
+            <div>
+              <h3>Review</h3>
+              <p className="muted">{visibleReviewItems.length} visible</p>
+            </div>
+            {instagramBatchNumber > 0 && (
+              <button type="button" onClick={loadNextInstagramBatch} disabled={!instagramNextCursor}>
+                Next Batch
+              </button>
+            )}
+          </div>
+          <div className="review-toolbar" aria-label="Candidate review controls">
+            <div className="segmented-control" aria-label="Review view mode">
+              {viewModes.map((mode) => (
                 <button
                   key={mode}
                   type="button"
-                  aria-pressed={instagramScanMode === mode}
-                  onClick={() => setInstagramScanMode(mode)}
+                  aria-pressed={viewMode === mode}
+                  onClick={() => setViewMode(mode)}
                 >
-                  {instagramScanModeLabel(mode)}
+                  {modeLabel(mode)}
                 </button>
               ))}
             </div>
-          </div>
-          <button type="button" onClick={scanInstagramBrowserUrl}>
-            Scan Instagram
-          </button>
-          <button type="button" onClick={() => setShowAdvancedFallbacks((visible) => !visible)}>
-            Advanced Fallbacks
-          </button>
-          {showAdvancedFallbacks && (
-            <div className="advanced-fallbacks">
-              <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
-              <textarea
-                id="instagram-helper-payload"
-                value={instagramPayloadText}
-                onChange={(event) => setInstagramPayloadText(event.target.value)}
-                rows={8}
-              />
-              <button type="button" onClick={scanInstagramHelperPayload}>
-                Scan Instagram Helper Payload
-              </button>
-              <button type="button" onClick={loadInstagramHelperCandidates}>
-                Load Helper Candidates
-              </button>
-              <label htmlFor="manual-paths">Manual path fallback</label>
-              <textarea
-                id="manual-paths"
-                value={manualPaths}
-                onChange={(event) => setManualPaths(event.target.value)}
-                rows={3}
-                placeholder="/absolute/path/to/file-or-folder"
-              />
-              <button type="button" onClick={scanManualPaths}>
-                Scan Manual Paths
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
-      <div className="review-toolbar" aria-label="Candidate review controls">
-        <div className="segmented-control" aria-label="Review view mode">
-          {viewModes.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={viewMode === mode}
-              onClick={() => setViewMode(mode)}
-            >
-              {modeLabel(mode)}
+            <label className="compact-field" htmlFor="media-filter">
+              Filter
+              <select
+                id="media-filter"
+                value={mediaFilter}
+                onChange={(event) => setMediaFilter(event.target.value as MediaFilter)}
+              >
+                <option value="all">All</option>
+                <option value="image">Images</option>
+                <option value="video">Videos</option>
+                <option value="audio">Voice</option>
+              </select>
+            </label>
+
+            <button type="button" onClick={selectVisibleReadyCandidates} disabled={!hasVisibleItems}>
+              Select All
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              aria-label="Select All Images"
+              onClick={() => selectVisibleRoleCandidates("image")}
+              disabled={!hasVisibleImageCandidates}
+            >
+              All Images
+            </button>
+            <button
+              type="button"
+              aria-label="Select All Videos"
+              onClick={() => selectVisibleRoleCandidates("video")}
+              disabled={!hasVisibleVideoCandidates}
+            >
+              All Videos
+            </button>
+            <button
+              type="button"
+              aria-label="Select All Voice"
+              onClick={() => selectVisibleRoleCandidates("audio")}
+              disabled={!hasVisibleAudioCandidates}
+            >
+              All Voice
+            </button>
+            <button
+              type="button"
+              aria-label="Deselect All"
+              onClick={deselectVisibleCandidates}
+              disabled={!hasVisibleItems}
+            >
+              Deselect
+            </button>
+            <button type="button" onClick={invertVisibleReadyCandidates} disabled={!hasVisibleItems}>
+              Invert
+            </button>
+            <button
+              className="primary-action"
+              type="button"
+              onClick={confirmIngest}
+              disabled={selectedReadyCount === 0}
+            >
+              Confirm Ingest
+            </button>
+          </div>
 
-        <label className="compact-field" htmlFor="media-filter">
-          Filter
-          <select
-            id="media-filter"
-            value={mediaFilter}
-            onChange={(event) => setMediaFilter(event.target.value as MediaFilter)}
-          >
-            <option value="all">All</option>
-            <option value="image">Images</option>
-            <option value="video">Videos</option>
-            <option value="audio">Voice</option>
-          </select>
-        </label>
-
-        <button type="button" onClick={selectVisibleReadyCandidates} disabled={!hasVisibleItems}>
-          Select All
-        </button>
-        <button
-          type="button"
-          onClick={() => selectVisibleRoleCandidates("image")}
-          disabled={!hasVisibleImageCandidates}
-        >
-          Select All Images
-        </button>
-        <button
-          type="button"
-          onClick={() => selectVisibleRoleCandidates("video")}
-          disabled={!hasVisibleVideoCandidates}
-        >
-          Select All Videos
-        </button>
-        <button
-          type="button"
-          onClick={() => selectVisibleRoleCandidates("audio")}
-          disabled={!hasVisibleAudioCandidates}
-        >
-          Select All Voice
-        </button>
-        <button type="button" onClick={deselectVisibleCandidates} disabled={!hasVisibleItems}>
-          Deselect All
-        </button>
-        <button type="button" onClick={invertVisibleReadyCandidates} disabled={!hasVisibleItems}>
-          Invert
-        </button>
-        <button
-          className="primary-action"
-          type="button"
-          onClick={confirmIngest}
-          disabled={selectedReadyCount === 0}
-        >
-          Confirm Ingest
-        </button>
-        {instagramBatchNumber > 0 && (
-          <button type="button" onClick={loadNextInstagramBatch} disabled={!instagramNextCursor}>
-            Next Batch
-          </button>
-        )}
-      </div>
-
-      <p aria-live="polite" className="status-line">
-        {status}
-      </p>
-
-      <dl className="metric-grid" aria-label="Ingress summary">
-        <div>
-          <dt>Imported</dt>
-          <dd>{mediaItems.length}</dd>
-        </div>
-        <div>
-          <dt>Candidates</dt>
-          <dd>{candidates.length}</dd>
-        </div>
-        <div>
-          <dt>Selected</dt>
-          <dd>{selectedReadyCount}</dd>
-        </div>
-        <div>
-          <dt>Skipped</dt>
-          <dd>{skippedCount}</dd>
-        </div>
-      </dl>
-
-      <div className="candidate-review">
-        {visibleReviewItems.length === 0 ? (
-          <p className="empty-state">No candidates scanned yet.</p>
-        ) : (
-          <>
-            {viewMode === "tile" && (
-              <TileView
-                items={visibleReviewItems}
-                selectedIds={selectedIds}
-                assetUrl={engine.assetUrl}
-                onToggleCandidate={toggleCandidate}
-                onPreviewVideo={setVideoPreviewItem}
-              />
+          <div className="candidate-review">
+            {visibleReviewItems.length === 0 ? (
+              <p className="empty-state">No candidates scanned yet.</p>
+            ) : (
+              <>
+                {viewMode === "tile" && (
+                  <TileView
+                    items={visibleReviewItems}
+                    selectedIds={selectedIds}
+                    assetUrl={engine.assetUrl}
+                    onToggleCandidate={toggleCandidate}
+                    onPreviewVideo={setVideoPreviewItem}
+                  />
+                )}
+                {viewMode === "list" && (
+                  <ListView
+                    items={visibleReviewItems}
+                    selectedIds={selectedIds}
+                    assetUrl={engine.assetUrl}
+                    onToggleCandidate={toggleCandidate}
+                    onPreviewVideo={setVideoPreviewItem}
+                  />
+                )}
+                {viewMode === "gallery" && galleryItem && (
+                  <GalleryView
+                    item={galleryItem}
+                    currentIndex={safeGalleryIndex}
+                    total={visibleReviewItems.length}
+                    selectedIds={selectedIds}
+                    assetUrl={engine.assetUrl}
+                    onToggleCandidate={toggleCandidate}
+                    onPreviewVideo={setVideoPreviewItem}
+                    onPrevious={() => setGalleryIndex(Math.max(0, safeGalleryIndex - 1))}
+                    onNext={() =>
+                      setGalleryIndex(Math.min(visibleReviewItems.length - 1, safeGalleryIndex + 1))
+                    }
+                  />
+                )}
+              </>
             )}
-            {viewMode === "list" && (
-              <ListView
-                items={visibleReviewItems}
-                selectedIds={selectedIds}
-                assetUrl={engine.assetUrl}
-                onToggleCandidate={toggleCandidate}
-                onPreviewVideo={setVideoPreviewItem}
-              />
-            )}
-            {viewMode === "gallery" && galleryItem && (
-              <GalleryView
-                item={galleryItem}
-                currentIndex={safeGalleryIndex}
-                total={visibleReviewItems.length}
-                selectedIds={selectedIds}
-                assetUrl={engine.assetUrl}
-                onToggleCandidate={toggleCandidate}
-                onPreviewVideo={setVideoPreviewItem}
-                onPrevious={() => setGalleryIndex(Math.max(0, safeGalleryIndex - 1))}
-                onNext={() =>
-                  setGalleryIndex(Math.min(visibleReviewItems.length - 1, safeGalleryIndex + 1))
-                }
-              />
-            )}
-          </>
-        )}
+          </div>
+        </section>
       </div>
 
       {videoPreviewItem && (
@@ -683,18 +722,18 @@ function TileView({
   return (
     <div className="candidate-grid">
       {items.map((item) => (
-        <article className="candidate-tile" key={item.id}>
-          <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
-          <div className="candidate-body">
+        <article className="candidate-tile" key={item.id} aria-label={item.displayName}>
+          <div className="candidate-media">
+            <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
             <RoleSelectors
               item={item}
               selectedIds={selectedIds}
               onToggleCandidate={onToggleCandidate}
             />
             <VideoPreviewButton item={item} onPreviewVideo={onPreviewVideo} />
+          </div>
+          <div className="candidate-body">
             <strong>{item.displayName}</strong>
-            <span>{reviewItemSummary(item)}</span>
-            <RoleStatusBadges item={item} />
           </div>
         </article>
       ))}
@@ -714,11 +753,8 @@ function ListView({
       <thead>
         <tr>
           <th>Preview</th>
-          <th>Use</th>
           <th>File</th>
           <th>Roles</th>
-          <th>Size</th>
-          <th>Status</th>
           <th>Path</th>
         </tr>
       </thead>
@@ -728,6 +764,7 @@ function ListView({
             <td>
               <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
             </td>
+            <td className="list-title-cell">{item.displayName}</td>
             <td>
               <RoleSelectors
                 item={item}
@@ -735,12 +772,6 @@ function ListView({
                 onToggleCandidate={onToggleCandidate}
               />
               <VideoPreviewButton item={item} onPreviewVideo={onPreviewVideo} />
-            </td>
-            <td>{item.displayName}</td>
-            <td>{roleSummary(item)}</td>
-            <td>{formatBytes(item.thumbnailCandidate.size_bytes)}</td>
-            <td>
-              <RoleStatusBadges item={item} />
             </td>
             <td className="path-cell">{item.sourceLocator}</td>
           </tr>
@@ -783,7 +814,6 @@ function GalleryView({
         <h3>{item.displayName}</h3>
         <p>{item.sourceLocator}</p>
         <p>{reviewItemSummary(item)}</p>
-        <RoleStatusBadges item={item} />
         <RoleSelectors
           item={item}
           selectedIds={selectedIds}
@@ -821,7 +851,10 @@ function RoleSelectors({
         const displayRole = roleLabel(role);
         const label = `Select as ${displayRole}: ${item.displayName}`;
         return (
-          <label key={role}>
+          <label
+            className={`role-chip ${selectedIds.has(candidate.id) ? "selected" : ""}`}
+            key={role}
+          >
             <input
               aria-label={label}
               type="checkbox"
@@ -829,26 +862,10 @@ function RoleSelectors({
               disabled={candidate.status !== "ready"}
               onChange={() => onToggleCandidate(candidate.id)}
             />
-            Select as {displayRole}
+            <span className="role-chip-label" aria-hidden="true">
+              {compactRoleLabel(role)}
+            </span>
           </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function RoleStatusBadges({ item }: { item: CandidateReviewItem }) {
-  const roles: CandidateRole[] = ["image", "video", "audio"];
-  return (
-    <div className="role-statuses">
-      {roles.map((role) => {
-        const candidate = candidateForRole(item, role);
-        if (!candidate) return null;
-        return (
-          <span className="role-status" key={role}>
-            <span className="role-name">{roleLabel(role)}</span>
-            <StatusBadge candidate={candidate} />
-          </span>
         );
       })}
     </div>
@@ -871,6 +888,10 @@ function CandidateThumbnail({
       {thumbnail ? (
         <>
           <img className="thumbnail-image" src={thumbnail} alt="" />
+          <span className="thumb-overlay" aria-hidden="true">
+            <span className="thumb-meta">{mediaSummary(candidate)}</span>
+            <span className={`thumb-status ${candidate.status}`}>{candidate.status}</span>
+          </span>
           <img
             className="hover-preview"
             src={thumbnail}
@@ -901,7 +922,7 @@ function VideoPreviewButton({
       aria-label={`Preview video: ${item.displayName}`}
       onClick={() => onPreviewVideo(item)}
     >
-      Preview video
+      Play
     </button>
   );
 }
@@ -938,15 +959,6 @@ function VideoPreviewDialog({
         </a>
       </div>
     </div>
-  );
-}
-
-function StatusBadge({ candidate }: { candidate: IngressCandidate }) {
-  return (
-    <span className={`status-badge ${candidate.status}`}>
-      {candidate.status}
-      {candidate.error_message ? `: ${candidate.error_message}` : ""}
-    </span>
   );
 }
 
@@ -1093,14 +1105,14 @@ function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidat
   return [...candidatesById.values()];
 }
 
-function roleSummary(item: CandidateReviewItem): string {
-  const roles: CandidateRole[] = ["image", "video", "audio"];
-  const labels = roles.filter((role) => candidateForRole(item, role)).map(roleLabel);
-  return labels.length > 0 ? labels.join(", ") : "unknown";
-}
-
 function roleLabel(role: CandidateRole): string {
   return role === "audio" ? "voice" : role;
+}
+
+function compactRoleLabel(role: CandidateRole): string {
+  if (role === "image") return "I";
+  if (role === "video") return "V";
+  return "Voice";
 }
 
 function reviewItemSummary(item: CandidateReviewItem): string {
@@ -1120,13 +1132,6 @@ function mediaSummary(candidate: IngressCandidate): string {
     return `${candidate.duration.toFixed(1)}s`;
   }
   return candidate.media_type ?? "unknown";
-}
-
-function formatBytes(bytes?: number | null): string {
-  if (!bytes) return "unknown";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function upsertJob(jobs: IngressJob[], job: IngressJob): IngressJob[] {

@@ -111,6 +111,36 @@ describe("DataIngressTab", () => {
     expect(screen.getByLabelText("Select as voice: example reel")).not.toBeChecked();
   });
 
+  it("renders compact review tiles with metadata over the image", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramVideoCandidate, instagramPosterCandidate, instagramVoiceCandidate],
+        errors: [],
+      }),
+    });
+
+    const { container } = render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+
+    const tile = screen.getByRole("article", { name: "example reel" });
+    expect(within(tile).getByText("720x1280")).toHaveClass("thumb-meta");
+    expect(within(tile).getAllByText("ready")[0]).toHaveClass("thumb-status");
+    expect(within(tile).getByText("I")).toHaveClass("role-chip-label");
+    expect(within(tile).getByText("V")).toHaveClass("role-chip-label");
+    expect(within(tile).getByText("Voice")).toHaveClass("role-chip-label");
+    expect(within(tile).queryByText("Select as image")).not.toBeInTheDocument();
+    expect(container.querySelector(".role-statuses")).toBeNull();
+  });
+
   it("selects all image, video, or voice roles independently", async () => {
     const user = userEvent.setup();
     const engine = engineWith({
