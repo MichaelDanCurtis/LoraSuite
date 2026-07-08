@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
@@ -237,3 +238,67 @@ def test_ingress_job_downloads_selected_social_video_original(tmp_path, monkeypa
     assert imported.raw_path.read_bytes() == video_bytes
     assert imported.metadata_json["original_path"].endswith(f"{candidate.id}.mp4")
     assert (tmp_path / "vault" / "downloads" / "instagram" / f"{candidate.id}.mp4").read_bytes() == video_bytes
+
+
+def test_ingress_job_downloads_selected_social_image_original(tmp_path, monkeypatch):
+    buffer = BytesIO()
+    Image.new("RGB", (48, 64), color=(30, 120, 200)).save(buffer, "JPEG")
+    image_bytes = buffer.getvalue()
+    service = IngressService(tmp_path / "vault")
+    candidate = IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator="https://www.instagram.com/p/example/",
+        display_name="example photo",
+        media_type=MediaType.IMAGE,
+        width=48,
+        height=64,
+        selected=True,
+        metadata_json={
+            "download_url": "https://cdninstagram.example/photo.jpg",
+            "helper_version": "lorasuite-instagram-web-api-v0",
+            "platform_media_id": "ig_photo_1",
+        },
+    )
+    service.store_candidates([candidate])
+
+    class FakeHeaders:
+        def get(self, _name: str, _default=None):
+            return str(len(image_bytes))
+
+        def get_content_type(self) -> str:
+            return "image/jpeg"
+
+    class FakeResponse:
+        headers = FakeHeaders()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            if getattr(self, "sent", False):
+                return b""
+            self.sent = True
+            return image_bytes
+
+    def fake_urlopen(_request, *, timeout: int, context):
+        assert timeout == 120
+        assert context is not None
+        return FakeResponse()
+
+    monkeypatch.setattr(ingress_module, "urlopen", fake_urlopen)
+
+    job = service.create_job(SourceKind.INSTAGRAM, [candidate.id])
+    completed = service.process_job(job.id)
+
+    assert completed.status == IngressJobStatus.COMPLETE
+    assert completed.imported_count == 1
+    assert completed.failed_count == 0
+    assert completed.deferred_count == 0
+    imported = completed.imported_media_items[0]
+    assert imported.media_type == MediaType.IMAGE
+    assert imported.raw_path.read_bytes() == image_bytes
+    assert imported.metadata_json["original_path"].endswith(f"{candidate.id}.jpg")
+    assert (tmp_path / "vault" / "downloads" / "instagram" / f"{candidate.id}.jpg").read_bytes() == image_bytes

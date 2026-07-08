@@ -22,6 +22,7 @@ from lorasuite_engine.models import IngressScanResult
 from lorasuite_engine.social_helper import scan_instagram_helper_payload
 
 MetadataExtractor = Callable[[str, str], dict[str, Any]]
+ProfileFetcher = Callable[[str, str], dict[str, Any]]
 ProfileReelsFetcher = Callable[[str, str, int], dict[str, Any]]
 ThumbnailFetcher = Callable[[str], tuple[bytes, str]]
 
@@ -47,12 +48,14 @@ def scan_instagram_url_with_browser_cookies(
     *,
     browser: str = "chrome",
     metadata_extractor: MetadataExtractor | None = None,
+    profile_fetcher: ProfileFetcher | None = None,
     profile_reels_fetcher: ProfileReelsFetcher | None = None,
     thumbnail_fetcher: ThumbnailFetcher | None = None,
 ) -> IngressScanResult:
     normalized_url = _validate_instagram_url(url)
     normalized_browser = _validate_browser(browser)
     extractor = metadata_extractor or _extract_metadata_with_ytdlp
+    profile_fetcher_impl = profile_fetcher or _fetch_profile_with_browser_cookies
     reels_fetcher = profile_reels_fetcher or _fetch_profile_reels_with_browser_cookies
     fetcher = thumbnail_fetcher or _fetch_thumbnail
 
@@ -65,6 +68,19 @@ def scan_instagram_url_with_browser_cookies(
         )
         payload = _helper_payload_from_instagram_clips_payload(
             metadata,
+            browser=normalized_browser,
+            thumbnail_fetcher=fetcher,
+        )
+    elif (profile_username := _profile_username(normalized_url)) is not None:
+        profile_metadata = profile_fetcher_impl(profile_username, normalized_browser)
+        reels_metadata = reels_fetcher(
+            profile_username,
+            normalized_browser,
+            PROFILE_REELS_PAGE_SIZE,
+        )
+        payload = _helper_payload_from_instagram_profile_payload(
+            profile_metadata,
+            reels_metadata,
             browser=normalized_browser,
             thumbnail_fetcher=fetcher,
         )
@@ -122,6 +138,21 @@ def _helper_payload_from_ytdlp_metadata(
         "helper_version": "lorasuite-ytdlp-browser-v0",
         "media": [item for item in media if item is not None],
     }
+
+
+def _fetch_profile_with_browser_cookies(username: str, browser: str) -> dict[str, Any]:
+    cookie_jar = _extract_browser_cookies(browser)
+    opener = build_opener(
+        HTTPCookieProcessor(cookie_jar),
+        HTTPSHandler(context=_ssl_context()),
+    )
+    referer = f"https://www.instagram.com/{username}/"
+    return _request_instagram_json(
+        opener,
+        "https://www.instagram.com/api/v1/users/web_profile_info/?"
+        + urlencode({"username": username}),
+        headers=_instagram_json_headers(referer),
+    )
 
 
 def _fetch_profile_reels_with_browser_cookies(
@@ -189,6 +220,29 @@ def _helper_payload_from_instagram_clips_payload(
     return {
         "helper_version": "lorasuite-instagram-web-api-v0",
         "media": [item for item in media if item is not None],
+    }
+
+
+def _helper_payload_from_instagram_profile_payload(
+    profile_metadata: dict[str, Any],
+    reels_metadata: dict[str, Any],
+    *,
+    browser: str,
+    thumbnail_fetcher: ThumbnailFetcher,
+) -> dict[str, Any]:
+    profile_media = [
+        _media_item_from_instagram_profile_node(entry, browser, thumbnail_fetcher)
+        for entry in _iter_instagram_profile_media(profile_metadata)
+    ]
+    reel_media = [
+        _media_item_from_instagram_clip(entry, browser, thumbnail_fetcher)
+        for entry in _iter_instagram_clip_media(reels_metadata)
+    ]
+    return {
+        "helper_version": "lorasuite-instagram-web-api-v0",
+        "media": _dedupe_media_items(
+            [item for item in profile_media + reel_media if item is not None]
+        ),
     }
 
 
@@ -281,6 +335,26 @@ def _iter_instagram_clip_media(metadata: dict[str, Any]) -> list[dict[str, Any]]
     return media
 
 
+def _iter_instagram_profile_media(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    user = ((metadata.get("data") or {}).get("user") or {})
+    timeline = user.get("edge_owner_to_timeline_media")
+    if not isinstance(timeline, dict):
+        return []
+
+    edges = timeline.get("edges")
+    if not isinstance(edges, list):
+        return []
+
+    media: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        node = edge.get("node")
+        if isinstance(node, dict):
+            media.append(node)
+    return media
+
+
 def _media_item_from_ytdlp_entry(
     entry: dict[str, Any],
     browser: str,
@@ -352,6 +426,43 @@ def _media_item_from_instagram_clip(
     return {key: value for key, value in item.items() if value is not None}
 
 
+def _media_item_from_instagram_profile_node(
+    entry: dict[str, Any],
+    browser: str,
+    thumbnail_fetcher: ThumbnailFetcher,
+) -> dict[str, Any] | None:
+    media_id = str(entry.get("id") or "").strip()
+    shortcode = str(entry.get("shortcode") or entry.get("code") or "").strip()
+    if not media_id and not shortcode:
+        return None
+
+    image_url = _best_instagram_profile_image_url(entry)
+    poster_data_url = _thumbnail_data_url(image_url, thumbnail_fetcher)
+    is_video = bool(entry.get("is_video"))
+    source_path = "reel" if is_video else "p"
+    source_url = f"https://www.instagram.com/{source_path}/{shortcode}/" if shortcode else ""
+    dimensions = entry.get("dimensions") if isinstance(entry.get("dimensions"), dict) else {}
+
+    item: dict[str, Any] = {
+        "id": media_id or _fallback_media_id(source_url),
+        "source_url": source_url,
+        "display_name": _instagram_profile_caption_text(entry)
+        or (f"Instagram photo {shortcode}" if shortcode else media_id),
+        "media_type": "video" if is_video else "image",
+        "download_url": str(entry.get("video_url") or image_url)
+        if is_video
+        else image_url,
+        "poster_url": image_url,
+        "thumbnail_url": image_url,
+        "poster_data_url": poster_data_url,
+        "width": _optional_int(dimensions.get("width") or entry.get("width")),
+        "height": _optional_int(dimensions.get("height") or entry.get("height")),
+        "browser_source": browser,
+        "extractor": "instagram-web-api",
+    }
+    return {key: value for key, value in item.items() if value is not None}
+
+
 def _best_thumbnail_url(entry: dict[str, Any]) -> str | None:
     thumbnails = entry.get("thumbnails")
     if isinstance(thumbnails, list) and thumbnails:
@@ -396,6 +507,34 @@ def _best_instagram_thumbnail_url(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _best_instagram_profile_image_url(entry: dict[str, Any]) -> str | None:
+    resources = entry.get("display_resources")
+    if isinstance(resources, list):
+        sorted_resources = sorted(
+            (resource for resource in resources if isinstance(resource, dict)),
+            key=lambda resource: (
+                _optional_int(resource.get("config_width") or resource.get("width")) or 0
+            )
+            * (
+                _optional_int(resource.get("config_height") or resource.get("height")) or 0
+            ),
+            reverse=True,
+        )
+        for resource in sorted_resources:
+            url = resource.get("src") or resource.get("url")
+            if isinstance(url, str) and url:
+                return url
+
+    display_url = entry.get("display_url")
+    if isinstance(display_url, str) and display_url:
+        return display_url
+
+    thumbnail_src = entry.get("thumbnail_src")
+    if isinstance(thumbnail_src, str) and thumbnail_src:
+        return thumbnail_src
+    return None
+
+
 def _best_instagram_video_url(entry: dict[str, Any]) -> str | None:
     video_versions = entry.get("video_versions")
     if not isinstance(video_versions, list):
@@ -425,6 +564,38 @@ def _instagram_caption_text(entry: dict[str, Any]) -> str | None:
     if isinstance(caption, str) and caption.strip():
         return caption.strip()
     return None
+
+
+def _instagram_profile_caption_text(entry: dict[str, Any]) -> str | None:
+    caption = entry.get("edge_media_to_caption")
+    if not isinstance(caption, dict):
+        return None
+    edges = caption.get("edges")
+    if not isinstance(edges, list):
+        return None
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        node = edge.get("node")
+        if not isinstance(node, dict):
+            continue
+        text = node.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
+
+
+def _dedupe_media_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        key = str(item.get("id") or item.get("source_url") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 def _thumbnail_data_url(
@@ -475,6 +646,26 @@ def _profile_reels_username(url: str) -> str | None:
     if len(parts) == 2 and parts[1] == "reels":
         return parts[0]
     return None
+
+
+def _profile_username(url: str) -> str | None:
+    parsed = urlparse(url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) != 1:
+        return None
+    username = parts[0]
+    if username.lower() in {
+        "accounts",
+        "direct",
+        "explore",
+        "p",
+        "reel",
+        "reels",
+        "stories",
+        "tv",
+    }:
+        return None
+    return username
 
 
 def _validate_browser(browser: str) -> str:

@@ -246,6 +246,7 @@ fieldset input {
 .review-toolbar button,
 .manual-ingress button,
 .helper-payload-panel button,
+.advanced-fallbacks button,
 .gallery-controls button {
   min-height: 36px;
   padding: 0 12px;
@@ -268,6 +269,13 @@ fieldset input {
 
 .helper-payload-panel {
   max-width: 760px;
+}
+
+.advanced-fallbacks {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #d7ddd6;
 }
 
 .compact-field {
@@ -350,10 +358,34 @@ fieldset input {
 }
 
 .candidate-body label,
-.gallery-details label {
+.gallery-details label,
+.role-selectors label {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+}
+
+.role-selectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.role-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.role-status {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.role-name {
+  color: #58666e;
+  font-size: 0.82rem;
 }
 
 .candidate-list,
@@ -378,6 +410,17 @@ fieldset input {
   color: #35424a;
   background: #eef2ee;
   font-size: 0.86rem;
+}
+
+.candidate-list .candidate-thumb {
+  width: 64px;
+  height: 64px;
+  aspect-ratio: auto;
+}
+
+.candidate-list .role-selectors {
+  display: grid;
+  min-width: 130px;
 }
 
 .path-cell {

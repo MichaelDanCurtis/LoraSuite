@@ -64,20 +64,26 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Confirm Ingest" })).toBeDisabled();
   });
 
-  it("shows instagram helper payload controls", async () => {
+  it("shows instagram source controls with advanced fallbacks hidden by default", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Instagram Source" }));
 
-    expect(screen.getByLabelText("Instagram helper payload")).toBeInTheDocument();
     expect(screen.getByLabelText("Instagram URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Browser cookies")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan Instagram URL" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Instagram helper payload")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Manual path fallback")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Advanced Fallbacks" }));
+
+    expect(screen.getByLabelText("Instagram helper payload")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Scan Instagram Helper Payload" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load Helper Candidates" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Manual path fallback")).toBeInTheDocument();
   });
 
   it("switches local ingress review modes", async () => {

@@ -144,6 +144,80 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     assert poster.selected is True
 
 
+def test_instagram_browser_scan_reads_profile_photos_with_browser_cookies(tmp_path):
+    profile_calls: list[tuple[str, str]] = []
+    reels_calls: list[tuple[str, str, int]] = []
+
+    def unsupported_ytdlp_metadata(_url: str, _browser: str) -> dict:
+        raise AssertionError("profile scans should not use yt-dlp metadata")
+
+    def fake_profile(username: str, browser: str) -> dict:
+        profile_calls.append((username, browser))
+        return {
+            "data": {
+                "user": {
+                    "edge_owner_to_timeline_media": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "id": "photo_1",
+                                    "shortcode": "PHOTO123",
+                                    "display_url": "https://cdninstagram.example/photo-large.jpg",
+                                    "dimensions": {"width": 1080, "height": 1350},
+                                    "is_video": False,
+                                    "edge_media_to_caption": {
+                                        "edges": [
+                                            {
+                                                "node": {
+                                                    "text": "profile photo caption",
+                                                }
+                                            }
+                                        ]
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+
+    def fake_profile_reels(username: str, browser: str, page_size: int) -> dict:
+        reels_calls.append((username, browser, page_size))
+        return {"items": []}
+
+    def fake_thumbnail(url: str) -> tuple[bytes, str]:
+        assert url == "https://cdninstagram.example/photo-large.jpg"
+        return jpeg_bytes(), "image/jpeg"
+
+    result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/marysuecurtis/",
+        tmp_path / "vault",
+        browser="chrome",
+        metadata_extractor=unsupported_ytdlp_metadata,
+        profile_fetcher=fake_profile,
+        profile_reels_fetcher=fake_profile_reels,
+        thumbnail_fetcher=fake_thumbnail,
+    )
+
+    assert profile_calls == [("marysuecurtis", "chrome")]
+    assert reels_calls == [("marysuecurtis", "chrome", 24)]
+    assert len(result.candidates) == 1
+    photo = result.candidates[0]
+    assert photo.source_kind == SourceKind.INSTAGRAM
+    assert photo.source_locator == "https://www.instagram.com/p/PHOTO123/"
+    assert photo.media_type == MediaType.IMAGE
+    assert photo.display_name == "profile photo caption"
+    assert photo.width == 1080
+    assert photo.height == 1350
+    assert photo.thumbnail_path is not None
+    assert Path(photo.thumbnail_path).exists()
+    assert photo.selected is True
+    assert photo.metadata_json["browser_source"] == "chrome"
+    assert photo.metadata_json["extractor"] == "instagram-web-api"
+    assert photo.metadata_json["download_url"] == "https://cdninstagram.example/photo-large.jpg"
+
+
 def test_instagram_browser_scan_rejects_non_instagram_urls(tmp_path):
     with pytest.raises(InstagramBrowserScanError, match="Instagram URL"):
         scan_instagram_url_with_browser_cookies(

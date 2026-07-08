@@ -23,14 +23,21 @@ from lorasuite_engine.vault import VaultService, detect_media_type, image_dimens
 
 MAX_REMOTE_DOWNLOAD_BYTES = 1024 * 1024 * 1024
 REMOTE_DOWNLOAD_SUFFIXES_BY_CONTENT_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
     "video/mp4": ".mp4",
     "video/quicktime": ".mov",
     "video/webm": ".webm",
 }
 REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE = {
+    MediaType.IMAGE: ".jpg",
     MediaType.VIDEO: ".mp4",
     MediaType.AUDIO: ".m4a",
 }
+REMOTE_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
+REMOTE_IMAGE_CONTENT_TYPES = frozenset({"image/jpeg", "image/jpg", "image/png"})
+REMOTE_VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm"})
 WEB_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -297,7 +304,7 @@ class IngressService:
             download_url,
             headers={
                 "User-Agent": WEB_USER_AGENT,
-                "Accept": "video/mp4,video/*,*/*",
+                "Accept": self._remote_download_accept_header(candidate.media_type),
                 "Referer": candidate.source_locator,
             },
         )
@@ -345,7 +352,7 @@ class IngressService:
         media_type: MediaType | None,
     ) -> str:
         suffix = Path(urlparse(download_url).path).suffix.lower()
-        if suffix in {".mp4", ".mov", ".m4v", ".webm"}:
+        if suffix in REMOTE_IMAGE_SUFFIXES | REMOTE_VIDEO_SUFFIXES:
             return suffix
         if media_type in REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE:
             return REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE[media_type]
@@ -361,9 +368,20 @@ class IngressService:
         expected_suffix = REMOTE_DOWNLOAD_SUFFIXES_BY_CONTENT_TYPE.get(content_type)
         if expected_suffix is not None and suffix == expected_suffix:
             return
-        if media_type == MediaType.VIDEO and suffix in {".mp4", ".mov", ".m4v", ".webm"}:
+        if media_type == MediaType.IMAGE and (
+            content_type in REMOTE_IMAGE_CONTENT_TYPES or suffix in REMOTE_IMAGE_SUFFIXES
+        ):
+            return
+        if media_type == MediaType.VIDEO and suffix in REMOTE_VIDEO_SUFFIXES:
             return
         raise ValueError(f"unsupported remote media content type: {content_type}")
+
+    def _remote_download_accept_header(self, media_type: MediaType | None) -> str:
+        if media_type == MediaType.IMAGE:
+            return "image/jpeg,image/png,image/*,*/*"
+        if media_type == MediaType.VIDEO:
+            return "video/mp4,video/*,*/*"
+        return "*/*"
 
     def _ssl_context(self) -> ssl.SSLContext:
         try:

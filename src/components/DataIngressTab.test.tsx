@@ -7,6 +7,178 @@ import type { EngineClient } from "../lib/api";
 import type { IngressCandidate, IngressJob } from "../lib/types";
 
 describe("DataIngressTab", () => {
+  const instagramVideoCandidate: IngressCandidate = {
+    id: "candidate_video",
+    source_kind: "instagram",
+    source_locator: "https://www.instagram.com/reel/example/",
+    display_name: "example reel",
+    media_type: "video",
+    duration: 9.5,
+    width: 720,
+    height: 1280,
+    thumbnail_path: "/tmp/vault/previews/social/example.jpg",
+    poster_asset_path: "/tmp/vault/previews/social/example.jpg",
+    status: "ready",
+    selected: false,
+    metadata_json: {
+      download_url: "https://cdninstagram.example/video.mp4",
+    },
+  };
+  const instagramPosterCandidate: IngressCandidate = {
+    id: "candidate_poster",
+    source_kind: "instagram",
+    source_locator: "/tmp/vault/previews/social/example.jpg",
+    display_name: "example reel poster",
+    media_type: "image",
+    width: 720,
+    height: 1280,
+    thumbnail_path: "/tmp/vault/previews/social/example.jpg",
+    status: "ready",
+    selected: true,
+    metadata_json: {
+      source_video_candidate_id: "candidate_video",
+      local_import_path: "/tmp/vault/previews/social/example.jpg",
+      asset_role: "video_poster",
+    },
+  };
+
+  function engineWith(overrides: Partial<EngineClient> = {}): EngineClient {
+    return {
+      importLocal: vi.fn(),
+      scanLocalIngress: vi.fn(),
+      scanInstagramBrowserUrl: vi.fn(),
+      scanInstagramHelperPayload: vi.fn(),
+      listIngressCandidates: vi.fn(),
+      createIngressJob: vi.fn(),
+      listIngressJobs: vi.fn(),
+      getIngressJob: vi.fn(),
+      exportRunComfyImage: vi.fn(),
+      assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
+      ...overrides,
+    };
+  }
+
+  async function scanInstagramUrl(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.type(
+      screen.getByLabelText("Instagram URL"),
+      "https://www.instagram.com/marysuecurtis/reels/",
+    );
+    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+  }
+
+  it("groups Instagram reel poster candidates under separate image and video selectors", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramVideoCandidate, instagramPosterCandidate],
+        errors: [],
+      }),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+
+    expect(await screen.findByText("example reel")).toBeInTheDocument();
+    expect(screen.queryByText("example reel poster")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Select as image: example reel")).toBeChecked();
+    expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
+  });
+
+  it("selects all image or video roles independently", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramVideoCandidate, instagramPosterCandidate],
+        errors: [],
+      }),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+    await user.click(screen.getByRole("button", { name: "Deselect All" }));
+    await user.click(screen.getByRole("button", { name: "Select All Images" }));
+
+    expect(screen.getByLabelText("Select as image: example reel")).toBeChecked();
+    expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Deselect All" }));
+    await user.click(screen.getByRole("button", { name: "Select All Videos" }));
+
+    expect(screen.getByLabelText("Select as image: example reel")).not.toBeChecked();
+    expect(screen.getByLabelText("Select as video: example reel")).toBeChecked();
+  });
+
+  it("keeps helper payload and manual path fallback behind advanced controls", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith();
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+
+    expect(screen.getByLabelText("Instagram URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Browser cookies")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan Instagram URL" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Instagram helper payload")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Manual path fallback")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Advanced Fallbacks" }));
+
+    expect(screen.getByLabelText("Instagram helper payload")).toBeInTheDocument();
+    expect(screen.getByLabelText("Manual path fallback")).toBeInTheDocument();
+  });
+
+  it("includes thumbnails in list view", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramPosterCandidate],
+        errors: [],
+      }),
+    });
+
+    const { container } = render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+    await user.click(screen.getByRole("button", { name: "List" }));
+
+    const image = container.querySelector(".candidate-list img");
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe(
+      "http://engine.test/assets/file?path=%2Ftmp%2Fvault%2Fpreviews%2Fsocial%2Fexample.jpg",
+    );
+  });
+
   it("shows deferred original downloads in the ingress job table", async () => {
     const user = userEvent.setup();
     const candidate: IngressCandidate = {
@@ -39,26 +211,20 @@ describe("DataIngressTab", () => {
       imported_media_items: [],
       created_at: "2026-07-08T00:00:00Z",
     } as IngressJob;
-    const engine: EngineClient = {
-      importLocal: vi.fn(),
-      scanLocalIngress: vi.fn(),
+    const engine: EngineClient = engineWith({
       scanInstagramBrowserUrl: vi.fn(),
       scanInstagramHelperPayload: vi.fn().mockResolvedValue({
         id: "scan_1",
         candidates: [candidate],
         errors: [],
       }),
-      listIngressCandidates: vi.fn(),
       createIngressJob: vi.fn().mockResolvedValue({
         ...completedJob,
         status: "queued",
         progress_message: "Queued",
       }),
-      listIngressJobs: vi.fn(),
       getIngressJob: vi.fn().mockResolvedValue(completedJob),
-      exportRunComfyImage: vi.fn(),
-      assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
-    };
+    });
 
     render(
       <DataIngressTab
@@ -69,6 +235,7 @@ describe("DataIngressTab", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.click(screen.getByRole("button", { name: "Advanced Fallbacks" }));
     await user.click(screen.getByRole("button", { name: "Scan Instagram Helper Payload" }));
     await user.click(await screen.findByRole("button", { name: "Confirm Ingest" }));
 
@@ -92,22 +259,13 @@ describe("DataIngressTab", () => {
       status: "ready",
       selected: true,
     };
-    const engine: EngineClient = {
-      importLocal: vi.fn(),
-      scanLocalIngress: vi.fn(),
-      scanInstagramBrowserUrl: vi.fn(),
+    const engine: EngineClient = engineWith({
       scanInstagramHelperPayload: vi.fn().mockResolvedValue({
         id: "scan_1",
         candidates: [candidate],
         errors: [],
       }),
-      listIngressCandidates: vi.fn(),
-      createIngressJob: vi.fn(),
-      listIngressJobs: vi.fn(),
-      getIngressJob: vi.fn(),
-      exportRunComfyImage: vi.fn(),
-      assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
-    };
+    });
 
     const { container } = render(
       <DataIngressTab
@@ -118,6 +276,7 @@ describe("DataIngressTab", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.click(screen.getByRole("button", { name: "Advanced Fallbacks" }));
     await user.click(screen.getByRole("button", { name: "Scan Instagram Helper Payload" }));
 
     const image = container.querySelector("img");

@@ -6,6 +6,17 @@ import type { IngressCandidate, IngressJob, MediaItem } from "../lib/types";
 
 type ViewMode = "tile" | "list" | "gallery";
 type MediaFilter = "all" | "image" | "video";
+type CandidateRole = "image" | "video";
+
+interface CandidateReviewItem {
+  id: string;
+  displayName: string;
+  sourceLocator: string;
+  imageCandidate?: IngressCandidate;
+  videoCandidate?: IngressCandidate;
+  thumbnailCandidate: IngressCandidate;
+  candidates: IngressCandidate[];
+}
 
 interface DataIngressTabProps {
   engine: EngineClient;
@@ -30,24 +41,31 @@ export function DataIngressTab({
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [jobs, setJobs] = useState<IngressJob[]>([]);
   const [showInstagramHelper, setShowInstagramHelper] = useState(false);
+  const [showAdvancedFallbacks, setShowAdvancedFallbacks] = useState(false);
   const [instagramUrl, setInstagramUrl] = useState("");
   const [instagramBrowser, setInstagramBrowser] = useState("chrome");
   const [instagramPayloadText, setInstagramPayloadText] = useState(
     '{\n  "helper_version": "fixture",\n  "media": []\n}',
   );
 
-  const visibleCandidates = candidates.filter((candidate) => {
-    return mediaFilter === "all" || candidate.media_type === mediaFilter;
-  });
+  const reviewItems = buildReviewItems(candidates);
+  const visibleReviewItems = reviewItems.filter((item) => itemMatchesFilter(item, mediaFilter));
   const selectedReadyCount = candidates.filter(
     (candidate) => candidate.status === "ready" && selectedIds.has(candidate.id),
   ).length;
   const skippedCount = candidates.filter((candidate) => candidate.status !== "ready").length;
   const safeGalleryIndex =
-    visibleCandidates.length === 0
+    visibleReviewItems.length === 0
       ? 0
-      : Math.min(galleryIndex, visibleCandidates.length - 1);
-  const galleryCandidate = visibleCandidates[safeGalleryIndex];
+      : Math.min(galleryIndex, visibleReviewItems.length - 1);
+  const galleryItem = visibleReviewItems[safeGalleryIndex];
+  const hasVisibleItems = visibleReviewItems.length > 0;
+  const hasVisibleImageCandidates = visibleReviewItems.some((item) =>
+    candidateForRole(item, "image"),
+  );
+  const hasVisibleVideoCandidates = visibleReviewItems.some((item) =>
+    candidateForRole(item, "video"),
+  );
 
   async function chooseFiles() {
     try {
@@ -228,8 +246,21 @@ export function DataIngressTab({
   function selectVisibleReadyCandidates() {
     setSelectedIds((currentIds) => {
       const nextIds = new Set(currentIds);
-      for (const candidate of visibleCandidates) {
+      for (const candidate of candidatesForReviewItems(visibleReviewItems)) {
         if (candidate.status === "ready") {
+          nextIds.add(candidate.id);
+        }
+      }
+      return nextIds;
+    });
+  }
+
+  function selectVisibleRoleCandidates(role: CandidateRole) {
+    setSelectedIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      for (const item of visibleReviewItems) {
+        const candidate = candidateForRole(item, role);
+        if (candidate?.status === "ready") {
           nextIds.add(candidate.id);
         }
       }
@@ -240,7 +271,7 @@ export function DataIngressTab({
   function deselectVisibleCandidates() {
     setSelectedIds((currentIds) => {
       const nextIds = new Set(currentIds);
-      for (const candidate of visibleCandidates) {
+      for (const candidate of candidatesForReviewItems(visibleReviewItems)) {
         nextIds.delete(candidate.id);
       }
       return nextIds;
@@ -250,7 +281,7 @@ export function DataIngressTab({
   function invertVisibleReadyCandidates() {
     setSelectedIds((currentIds) => {
       const nextIds = new Set(currentIds);
-      for (const candidate of visibleCandidates) {
+      for (const candidate of candidatesForReviewItems(visibleReviewItems)) {
         if (candidate.status !== "ready") continue;
         if (nextIds.has(candidate.id)) {
           nextIds.delete(candidate.id);
@@ -308,35 +339,39 @@ export function DataIngressTab({
           <button type="button" onClick={scanInstagramBrowserUrl}>
             Scan Instagram URL
           </button>
-          <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
-          <textarea
-            id="instagram-helper-payload"
-            value={instagramPayloadText}
-            onChange={(event) => setInstagramPayloadText(event.target.value)}
-            rows={8}
-          />
-          <button type="button" onClick={scanInstagramHelperPayload}>
-            Scan Instagram Helper Payload
+          <button type="button" onClick={() => setShowAdvancedFallbacks((visible) => !visible)}>
+            Advanced Fallbacks
           </button>
-          <button type="button" onClick={loadInstagramHelperCandidates}>
-            Load Helper Candidates
-          </button>
+          {showAdvancedFallbacks && (
+            <div className="advanced-fallbacks">
+              <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
+              <textarea
+                id="instagram-helper-payload"
+                value={instagramPayloadText}
+                onChange={(event) => setInstagramPayloadText(event.target.value)}
+                rows={8}
+              />
+              <button type="button" onClick={scanInstagramHelperPayload}>
+                Scan Instagram Helper Payload
+              </button>
+              <button type="button" onClick={loadInstagramHelperCandidates}>
+                Load Helper Candidates
+              </button>
+              <label htmlFor="manual-paths">Manual path fallback</label>
+              <textarea
+                id="manual-paths"
+                value={manualPaths}
+                onChange={(event) => setManualPaths(event.target.value)}
+                rows={3}
+                placeholder="/absolute/path/to/file-or-folder"
+              />
+              <button type="button" onClick={scanManualPaths}>
+                Scan Manual Paths
+              </button>
+            </div>
+          )}
         </div>
       )}
-
-      <div className="form-stack manual-ingress">
-        <label htmlFor="manual-paths">Manual path fallback</label>
-        <textarea
-          id="manual-paths"
-          value={manualPaths}
-          onChange={(event) => setManualPaths(event.target.value)}
-          rows={3}
-          placeholder="/absolute/path/to/file-or-folder"
-        />
-        <button type="button" onClick={scanManualPaths}>
-          Scan Manual Paths
-        </button>
-      </div>
 
       <div className="review-toolbar" aria-label="Candidate review controls">
         <div className="segmented-control" aria-label="Review view mode">
@@ -365,13 +400,27 @@ export function DataIngressTab({
           </select>
         </label>
 
-        <button type="button" onClick={selectVisibleReadyCandidates} disabled={visibleCandidates.length === 0}>
+        <button type="button" onClick={selectVisibleReadyCandidates} disabled={!hasVisibleItems}>
           Select All
         </button>
-        <button type="button" onClick={deselectVisibleCandidates} disabled={visibleCandidates.length === 0}>
+        <button
+          type="button"
+          onClick={() => selectVisibleRoleCandidates("image")}
+          disabled={!hasVisibleImageCandidates}
+        >
+          Select All Images
+        </button>
+        <button
+          type="button"
+          onClick={() => selectVisibleRoleCandidates("video")}
+          disabled={!hasVisibleVideoCandidates}
+        >
+          Select All Videos
+        </button>
+        <button type="button" onClick={deselectVisibleCandidates} disabled={!hasVisibleItems}>
           Deselect All
         </button>
-        <button type="button" onClick={invertVisibleReadyCandidates} disabled={visibleCandidates.length === 0}>
+        <button type="button" onClick={invertVisibleReadyCandidates} disabled={!hasVisibleItems}>
           Invert
         </button>
         <button
@@ -408,13 +457,13 @@ export function DataIngressTab({
       </dl>
 
       <div className="candidate-review">
-        {visibleCandidates.length === 0 ? (
+        {visibleReviewItems.length === 0 ? (
           <p className="empty-state">No candidates scanned yet.</p>
         ) : (
           <>
             {viewMode === "tile" && (
               <TileView
-                candidates={visibleCandidates}
+                items={visibleReviewItems}
                 selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
@@ -422,23 +471,23 @@ export function DataIngressTab({
             )}
             {viewMode === "list" && (
               <ListView
-                candidates={visibleCandidates}
+                items={visibleReviewItems}
                 selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
               />
             )}
-            {viewMode === "gallery" && galleryCandidate && (
+            {viewMode === "gallery" && galleryItem && (
               <GalleryView
-                candidate={galleryCandidate}
+                item={galleryItem}
                 currentIndex={safeGalleryIndex}
-                total={visibleCandidates.length}
-                selected={selectedIds.has(galleryCandidate.id)}
+                total={visibleReviewItems.length}
+                selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
-                onToggleCandidate={() => toggleCandidate(galleryCandidate.id)}
+                onToggleCandidate={toggleCandidate}
                 onPrevious={() => setGalleryIndex(Math.max(0, safeGalleryIndex - 1))}
                 onNext={() =>
-                  setGalleryIndex(Math.min(visibleCandidates.length - 1, safeGalleryIndex + 1))
+                  setGalleryIndex(Math.min(visibleReviewItems.length - 1, safeGalleryIndex + 1))
                 }
               />
             )}
@@ -484,31 +533,27 @@ export function DataIngressTab({
 }
 
 interface CandidateViewProps {
-  candidates: IngressCandidate[];
+  items: CandidateReviewItem[];
   selectedIds: Set<string>;
   assetUrl(path: string): string;
   onToggleCandidate(candidateId: string): void;
 }
 
-function TileView({ candidates, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
+function TileView({ items, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
   return (
     <div className="candidate-grid">
-      {candidates.map((candidate) => (
-        <article className="candidate-tile" key={candidate.id}>
-          <CandidateThumbnail candidate={candidate} assetUrl={assetUrl} />
+      {items.map((item) => (
+        <article className="candidate-tile" key={item.id}>
+          <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
           <div className="candidate-body">
-            <label>
-              <input
-                type="checkbox"
-                checked={selectedIds.has(candidate.id)}
-                disabled={candidate.status !== "ready"}
-                onChange={() => onToggleCandidate(candidate.id)}
-              />
-              Select
-            </label>
-            <strong>{candidate.display_name}</strong>
-            <span>{mediaSummary(candidate)}</span>
-            <StatusBadge candidate={candidate} />
+            <RoleSelectors
+              item={item}
+              selectedIds={selectedIds}
+              onToggleCandidate={onToggleCandidate}
+            />
+            <strong>{item.displayName}</strong>
+            <span>{reviewItemSummary(item)}</span>
+            <RoleStatusBadges item={item} />
           </div>
         </article>
       ))}
@@ -516,38 +561,40 @@ function TileView({ candidates, selectedIds, assetUrl, onToggleCandidate }: Cand
   );
 }
 
-function ListView({ candidates, selectedIds, onToggleCandidate }: CandidateViewProps) {
+function ListView({ items, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
   return (
-    <table className="candidate-list">
+    <table className="candidate-list" aria-label="Candidate list">
       <thead>
         <tr>
+          <th>Preview</th>
           <th>Use</th>
           <th>File</th>
-          <th>Type</th>
+          <th>Roles</th>
           <th>Size</th>
           <th>Status</th>
           <th>Path</th>
         </tr>
       </thead>
       <tbody>
-        {candidates.map((candidate) => (
-          <tr key={candidate.id}>
+        {items.map((item) => (
+          <tr key={item.id}>
             <td>
-              <input
-                aria-label={`Select ${candidate.display_name}`}
-                type="checkbox"
-                checked={selectedIds.has(candidate.id)}
-                disabled={candidate.status !== "ready"}
-                onChange={() => onToggleCandidate(candidate.id)}
+              <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
+            </td>
+            <td>
+              <RoleSelectors
+                item={item}
+                selectedIds={selectedIds}
+                onToggleCandidate={onToggleCandidate}
               />
             </td>
-            <td>{candidate.display_name}</td>
-            <td>{candidate.media_type ?? "unknown"}</td>
-            <td>{formatBytes(candidate.size_bytes)}</td>
+            <td>{item.displayName}</td>
+            <td>{roleSummary(item)}</td>
+            <td>{formatBytes(item.thumbnailCandidate.size_bytes)}</td>
             <td>
-              <StatusBadge candidate={candidate} />
+              <RoleStatusBadges item={item} />
             </td>
-            <td className="path-cell">{candidate.source_locator}</td>
+            <td className="path-cell">{item.sourceLocator}</td>
           </tr>
         ))}
       </tbody>
@@ -556,21 +603,21 @@ function ListView({ candidates, selectedIds, onToggleCandidate }: CandidateViewP
 }
 
 interface GalleryViewProps {
-  candidate: IngressCandidate;
+  item: CandidateReviewItem;
   currentIndex: number;
   total: number;
-  selected: boolean;
+  selectedIds: Set<string>;
   assetUrl(path: string): string;
-  onToggleCandidate(): void;
+  onToggleCandidate(candidateId: string): void;
   onPrevious(): void;
   onNext(): void;
 }
 
 function GalleryView({
-  candidate,
+  item,
   currentIndex,
   total,
-  selected,
+  selectedIds,
   assetUrl,
   onToggleCandidate,
   onPrevious,
@@ -578,24 +625,20 @@ function GalleryView({
 }: GalleryViewProps) {
   return (
     <div className="gallery-review">
-      <CandidateThumbnail candidate={candidate} assetUrl={assetUrl} large />
+      <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} large />
       <div className="gallery-details">
         <p className="muted">
           {currentIndex + 1} of {total}
         </p>
-        <h3>{candidate.display_name}</h3>
-        <p>{candidate.source_locator}</p>
-        <p>{mediaSummary(candidate)}</p>
-        <StatusBadge candidate={candidate} />
-        <label>
-          <input
-            type="checkbox"
-            checked={selected}
-            disabled={candidate.status !== "ready"}
-            onChange={onToggleCandidate}
-          />
-          Select for ingest
-        </label>
+        <h3>{item.displayName}</h3>
+        <p>{item.sourceLocator}</p>
+        <p>{reviewItemSummary(item)}</p>
+        <RoleStatusBadges item={item} />
+        <RoleSelectors
+          item={item}
+          selectedIds={selectedIds}
+          onToggleCandidate={onToggleCandidate}
+        />
         <div className="gallery-controls">
           <button type="button" onClick={onPrevious} disabled={currentIndex === 0}>
             Previous
@@ -605,6 +648,57 @@ function GalleryView({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RoleSelectors({
+  item,
+  selectedIds,
+  onToggleCandidate,
+}: {
+  item: CandidateReviewItem;
+  selectedIds: Set<string>;
+  onToggleCandidate(candidateId: string): void;
+}) {
+  const roles: CandidateRole[] = ["image", "video"];
+  return (
+    <div className="role-selectors">
+      {roles.map((role) => {
+        const candidate = candidateForRole(item, role);
+        if (!candidate) return null;
+        const label = `Select as ${role}: ${item.displayName}`;
+        return (
+          <label key={role}>
+            <input
+              aria-label={label}
+              type="checkbox"
+              checked={selectedIds.has(candidate.id)}
+              disabled={candidate.status !== "ready"}
+              onChange={() => onToggleCandidate(candidate.id)}
+            />
+            Select as {role}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function RoleStatusBadges({ item }: { item: CandidateReviewItem }) {
+  const roles: CandidateRole[] = ["image", "video"];
+  return (
+    <div className="role-statuses">
+      {roles.map((role) => {
+        const candidate = candidateForRole(item, role);
+        if (!candidate) return null;
+        return (
+          <span className="role-status" key={role}>
+            <span className="role-name">{role}</span>
+            <StatusBadge candidate={candidate} />
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -648,6 +742,102 @@ function browserLabel(browser: string): string {
   return browser[0].toUpperCase() + browser.slice(1);
 }
 
+function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[] {
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const posterByVideoCandidateId = new Map<string, IngressCandidate>();
+  for (const candidate of candidates) {
+    const videoCandidateId = sourceVideoCandidateId(candidate);
+    if (
+      candidate.media_type === "image" &&
+      videoCandidateId &&
+      candidatesById.has(videoCandidateId)
+    ) {
+      posterByVideoCandidateId.set(videoCandidateId, candidate);
+    }
+  }
+
+  const consumedIds = new Set<string>();
+  const items: CandidateReviewItem[] = [];
+  for (const candidate of candidates) {
+    if (consumedIds.has(candidate.id)) continue;
+
+    const pairedVideoId = sourceVideoCandidateId(candidate);
+    if (pairedVideoId && candidatesById.has(pairedVideoId)) {
+      continue;
+    }
+
+    const posterCandidate = posterByVideoCandidateId.get(candidate.id);
+    if (candidate.media_type === "video") {
+      const itemCandidates = posterCandidate ? [posterCandidate, candidate] : [candidate];
+      consumedIds.add(candidate.id);
+      if (posterCandidate) consumedIds.add(posterCandidate.id);
+      items.push({
+        id: candidate.id,
+        displayName: candidate.display_name,
+        sourceLocator: candidate.source_locator,
+        imageCandidate: posterCandidate,
+        videoCandidate: candidate,
+        thumbnailCandidate: posterCandidate ?? candidate,
+        candidates: itemCandidates,
+      });
+      continue;
+    }
+
+    consumedIds.add(candidate.id);
+    items.push({
+      id: candidate.id,
+      displayName: candidate.display_name,
+      sourceLocator: candidate.source_locator,
+      imageCandidate: candidate.media_type === "image" ? candidate : undefined,
+      thumbnailCandidate: candidate,
+      candidates: [candidate],
+    });
+  }
+
+  return items;
+}
+
+function sourceVideoCandidateId(candidate: IngressCandidate): string | undefined {
+  const rawValue = candidate.metadata_json?.source_video_candidate_id;
+  return typeof rawValue === "string" && rawValue ? rawValue : undefined;
+}
+
+function itemMatchesFilter(item: CandidateReviewItem, mediaFilter: MediaFilter): boolean {
+  return mediaFilter === "all" || candidateForRole(item, mediaFilter) !== undefined;
+}
+
+function candidateForRole(
+  item: CandidateReviewItem,
+  role: CandidateRole,
+): IngressCandidate | undefined {
+  return role === "image" ? item.imageCandidate : item.videoCandidate;
+}
+
+function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidate[] {
+  const candidatesById = new Map<string, IngressCandidate>();
+  for (const item of items) {
+    for (const candidate of item.candidates) {
+      candidatesById.set(candidate.id, candidate);
+    }
+  }
+  return [...candidatesById.values()];
+}
+
+function roleSummary(item: CandidateReviewItem): string {
+  const roles: CandidateRole[] = ["image", "video"];
+  const labels = roles.filter((role) => candidateForRole(item, role));
+  return labels.length > 0 ? labels.join(", ") : "unknown";
+}
+
+function reviewItemSummary(item: CandidateReviewItem): string {
+  const baseSummary = mediaSummary(item.thumbnailCandidate);
+  const videoDuration = item.videoCandidate?.duration;
+  if (item.imageCandidate && item.videoCandidate && videoDuration) {
+    return `${baseSummary} - video ${videoDuration.toFixed(1)}s`;
+  }
+  return baseSummary;
+}
+
 function mediaSummary(candidate: IngressCandidate): string {
   if (candidate.width && candidate.height) {
     return `${candidate.width}x${candidate.height}`;
@@ -678,7 +868,7 @@ function upsertJob(jobs: IngressJob[], job: IngressJob): IngressJob[] {
 
 function dialogErrorMessage(error: unknown): string {
   if (error instanceof Error) {
-    return `Native file picker unavailable: ${error.message}`;
+    return `Native file picker unavailable: ${error.message}. Use Advanced Fallbacks to scan paths manually.`;
   }
-  return "Native file picker unavailable. Use the manual path fallback.";
+  return "Native file picker unavailable. Use Advanced Fallbacks to scan paths manually.";
 }
