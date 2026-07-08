@@ -42,6 +42,7 @@ class InstagramHelperScanRequest(BaseModel):
 class InstagramBrowserScanRequest(BaseModel):
     url: str
     browser: str = "chrome"
+    limit: int = Field(default=24, ge=1, le=100)
 
 
 class IngressJobRequest(BaseModel):
@@ -135,6 +136,7 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
                 request.url,
                 app.state.vault_root,
                 browser=request.browser,
+                limit=request.limit,
             )
         except InstagramBrowserScanError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

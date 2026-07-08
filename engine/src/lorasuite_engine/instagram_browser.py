@@ -28,6 +28,7 @@ ThumbnailFetcher = Callable[[str], tuple[bytes, str]]
 
 INSTAGRAM_WEB_APP_ID = "936619743392459"
 PROFILE_REELS_PAGE_SIZE = 24
+MAX_PROFILE_REELS_PAGE_SIZE = 100
 SUPPORTED_BROWSER_COOKIE_SOURCES = frozenset(
     {"brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi"}
 )
@@ -51,9 +52,11 @@ def scan_instagram_url_with_browser_cookies(
     profile_fetcher: ProfileFetcher | None = None,
     profile_reels_fetcher: ProfileReelsFetcher | None = None,
     thumbnail_fetcher: ThumbnailFetcher | None = None,
+    limit: int = PROFILE_REELS_PAGE_SIZE,
 ) -> IngressScanResult:
     normalized_url = _validate_instagram_url(url)
     normalized_browser = _validate_browser(browser)
+    scan_limit = _validate_scan_limit(limit)
     extractor = metadata_extractor or _extract_metadata_with_ytdlp
     profile_fetcher_impl = profile_fetcher or _fetch_profile_with_browser_cookies
     reels_fetcher = profile_reels_fetcher or _fetch_profile_reels_with_browser_cookies
@@ -61,28 +64,32 @@ def scan_instagram_url_with_browser_cookies(
 
     profile_reels_username = _profile_reels_username(normalized_url)
     if profile_reels_username is not None:
-        metadata = reels_fetcher(
+        profile_metadata = profile_fetcher_impl(profile_reels_username, normalized_browser)
+        reels_metadata = reels_fetcher(
             profile_reels_username,
             normalized_browser,
-            PROFILE_REELS_PAGE_SIZE,
-        )
-        payload = _helper_payload_from_instagram_clips_payload(
-            metadata,
-            browser=normalized_browser,
-            thumbnail_fetcher=fetcher,
-        )
-    elif (profile_username := _profile_username(normalized_url)) is not None:
-        profile_metadata = profile_fetcher_impl(profile_username, normalized_browser)
-        reels_metadata = reels_fetcher(
-            profile_username,
-            normalized_browser,
-            PROFILE_REELS_PAGE_SIZE,
+            scan_limit,
         )
         payload = _helper_payload_from_instagram_profile_payload(
             profile_metadata,
             reels_metadata,
             browser=normalized_browser,
             thumbnail_fetcher=fetcher,
+            limit=scan_limit,
+        )
+    elif (profile_username := _profile_username(normalized_url)) is not None:
+        profile_metadata = profile_fetcher_impl(profile_username, normalized_browser)
+        reels_metadata = reels_fetcher(
+            profile_username,
+            normalized_browser,
+            scan_limit,
+        )
+        payload = _helper_payload_from_instagram_profile_payload(
+            profile_metadata,
+            reels_metadata,
+            browser=normalized_browser,
+            thumbnail_fetcher=fetcher,
+            limit=scan_limit,
         )
     else:
         metadata = extractor(normalized_url, normalized_browser)
@@ -147,12 +154,32 @@ def _fetch_profile_with_browser_cookies(username: str, browser: str) -> dict[str
         HTTPSHandler(context=_ssl_context()),
     )
     referer = f"https://www.instagram.com/{username}/"
-    return _request_instagram_json(
+    profile_payload = _request_instagram_json(
         opener,
         "https://www.instagram.com/api/v1/users/web_profile_info/?"
         + urlencode({"username": username}),
         headers=_instagram_json_headers(referer),
     )
+    if _iter_instagram_profile_media(profile_payload):
+        return profile_payload
+
+    user = ((profile_payload.get("data") or {}).get("user") or {})
+    user_id = str(user.get("id") or "").strip()
+    if not user_id:
+        return profile_payload
+
+    try:
+        feed_payload = _request_instagram_json(
+            opener,
+            f"https://www.instagram.com/api/v1/feed/user/{user_id}/?"
+            + urlencode({"count": str(PROFILE_REELS_PAGE_SIZE)}),
+            headers=_instagram_json_headers(referer),
+        )
+    except InstagramBrowserScanError:
+        return profile_payload
+    if _iter_instagram_profile_media(feed_payload):
+        return feed_payload
+    return profile_payload
 
 
 def _fetch_profile_reels_with_browser_cookies(
@@ -229,14 +256,15 @@ def _helper_payload_from_instagram_profile_payload(
     *,
     browser: str,
     thumbnail_fetcher: ThumbnailFetcher,
+    limit: int = PROFILE_REELS_PAGE_SIZE,
 ) -> dict[str, Any]:
     profile_media = [
         _media_item_from_instagram_profile_node(entry, browser, thumbnail_fetcher)
-        for entry in _iter_instagram_profile_media(profile_metadata)
+        for entry in _iter_instagram_profile_media(profile_metadata)[:limit]
     ]
     reel_media = [
         _media_item_from_instagram_clip(entry, browser, thumbnail_fetcher)
-        for entry in _iter_instagram_clip_media(reels_metadata)
+        for entry in _iter_instagram_clip_media(reels_metadata)[:limit]
     ]
     return {
         "helper_version": "lorasuite-instagram-web-api-v0",
@@ -336,6 +364,14 @@ def _iter_instagram_clip_media(metadata: dict[str, Any]) -> list[dict[str, Any]]
 
 
 def _iter_instagram_profile_media(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    items = metadata.get("items")
+    if isinstance(items, list):
+        return [item for item in items if isinstance(item, dict)]
+
+    profile_grid_items = metadata.get("profile_grid_items")
+    if isinstance(profile_grid_items, list):
+        return [item for item in profile_grid_items if isinstance(item, dict)]
+
     user = ((metadata.get("data") or {}).get("user") or {})
     timeline = user.get("edge_owner_to_timeline_media")
     if not isinstance(timeline, dict):
@@ -401,11 +437,7 @@ def _media_item_from_instagram_clip(
     poster_data_url = _thumbnail_data_url(thumbnail_url, thumbnail_fetcher)
     source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else ""
     duration = _optional_float(entry.get("video_duration") or entry.get("duration"))
-    media_type = (
-        "video"
-        if entry.get("media_type") == 2 or entry.get("video_versions") or duration
-        else "image"
-    )
+    media_type = "video" if _is_instagram_video_entry(entry) or duration else "image"
 
     item: dict[str, Any] = {
         "id": media_id or _fallback_media_id(source_url),
@@ -431,14 +463,14 @@ def _media_item_from_instagram_profile_node(
     browser: str,
     thumbnail_fetcher: ThumbnailFetcher,
 ) -> dict[str, Any] | None:
-    media_id = str(entry.get("id") or "").strip()
+    media_id = str(entry.get("id") or entry.get("pk") or "").strip()
     shortcode = str(entry.get("shortcode") or entry.get("code") or "").strip()
     if not media_id and not shortcode:
         return None
 
     image_url = _best_instagram_profile_image_url(entry)
     poster_data_url = _thumbnail_data_url(image_url, thumbnail_fetcher)
-    is_video = bool(entry.get("is_video"))
+    is_video = _is_instagram_video_entry(entry)
     source_path = "reel" if is_video else "p"
     source_url = f"https://www.instagram.com/{source_path}/{shortcode}/" if shortcode else ""
     dimensions = entry.get("dimensions") if isinstance(entry.get("dimensions"), dict) else {}
@@ -447,16 +479,22 @@ def _media_item_from_instagram_profile_node(
         "id": media_id or _fallback_media_id(source_url),
         "source_url": source_url,
         "display_name": _instagram_profile_caption_text(entry)
+        or _instagram_caption_text(entry)
         or (f"Instagram photo {shortcode}" if shortcode else media_id),
         "media_type": "video" if is_video else "image",
-        "download_url": str(entry.get("video_url") or image_url)
+        "download_url": _best_instagram_video_url(entry)
+        or str(entry.get("video_url") or image_url)
         if is_video
         else image_url,
         "poster_url": image_url,
         "thumbnail_url": image_url,
         "poster_data_url": poster_data_url,
-        "width": _optional_int(dimensions.get("width") or entry.get("width")),
-        "height": _optional_int(dimensions.get("height") or entry.get("height")),
+        "width": _optional_int(
+            dimensions.get("width") or entry.get("original_width") or entry.get("width")
+        ),
+        "height": _optional_int(
+            dimensions.get("height") or entry.get("original_height") or entry.get("height")
+        ),
         "browser_source": browser,
         "extractor": "instagram-web-api",
     }
@@ -532,6 +570,9 @@ def _best_instagram_profile_image_url(entry: dict[str, Any]) -> str | None:
     thumbnail_src = entry.get("thumbnail_src")
     if isinstance(thumbnail_src, str) and thumbnail_src:
         return thumbnail_src
+    thumbnail_url = _best_instagram_thumbnail_url(entry)
+    if thumbnail_url:
+        return thumbnail_url
     return None
 
 
@@ -553,6 +594,16 @@ def _best_instagram_video_url(entry: dict[str, Any]) -> str | None:
         if isinstance(url, str) and url:
             return url
     return None
+
+
+def _is_instagram_video_entry(entry: dict[str, Any]) -> bool:
+    media_type = entry.get("media_type")
+    return (
+        bool(entry.get("is_video"))
+        or media_type == 2
+        or str(media_type) == "2"
+        or bool(entry.get("video_versions"))
+    )
 
 
 def _instagram_caption_text(entry: dict[str, Any]) -> str | None:
@@ -589,11 +640,14 @@ def _dedupe_media_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in items:
-        key = str(item.get("id") or item.get("source_url") or "").strip()
-        if key and key in seen:
+        identifiers = {
+            str(value).strip()
+            for value in (item.get("id"), item.get("source_url"))
+            if str(value or "").strip()
+        }
+        if identifiers and identifiers.intersection(seen):
             continue
-        if key:
-            seen.add(key)
+        seen.update(identifiers)
         deduped.append(item)
     return deduped
 
@@ -673,6 +727,18 @@ def _validate_browser(browser: str) -> str:
     if normalized not in SUPPORTED_BROWSER_COOKIE_SOURCES:
         supported = ", ".join(sorted(SUPPORTED_BROWSER_COOKIE_SOURCES))
         raise InstagramBrowserScanError(f"Unsupported browser cookie source. Use one of: {supported}.")
+    return normalized
+
+
+def _validate_scan_limit(limit: int) -> int:
+    try:
+        normalized = int(limit)
+    except (TypeError, ValueError) as error:
+        raise InstagramBrowserScanError("Instagram scan limit must be a number.") from error
+    if normalized < 1 or normalized > MAX_PROFILE_REELS_PAGE_SIZE:
+        raise InstagramBrowserScanError(
+            f"Instagram scan limit must be between 1 and {MAX_PROFILE_REELS_PAGE_SIZE}."
+        )
     return normalized
 
 

@@ -24,7 +24,11 @@ export interface EngineClient {
     payload: Record<string, unknown>,
     includeVideoPostersAsImageCandidates?: boolean,
   ): Promise<IngressScanResult>;
-  scanInstagramBrowserUrl(url: string, browser?: string): Promise<IngressScanResult>;
+  scanInstagramBrowserUrl(
+    url: string,
+    browser?: string,
+    limit?: number,
+  ): Promise<IngressScanResult>;
   listIngressCandidates(sourceKind?: SourceKind): Promise<IngressScanResult>;
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
   listIngressJobs(): Promise<IngressJob[]>;
@@ -85,8 +89,12 @@ export function createEngineClient(
         include_video_posters_as_image_candidates: includeVideoPostersAsImageCandidates,
       });
     },
-    scanInstagramBrowserUrl(url: string, browser = "chrome") {
-      return postJson<IngressScanResult>("/ingress/instagram/browser-scan", { url, browser });
+    scanInstagramBrowserUrl(url: string, browser = "chrome", limit = 24) {
+      return postJson<IngressScanResult>("/ingress/instagram/browser-scan", {
+        url,
+        browser,
+        limit,
+      });
     },
     listIngressCandidates(sourceKind?: SourceKind) {
       const query = sourceKind ? `?source_kind=${encodeURIComponent(sourceKind)}` : "";

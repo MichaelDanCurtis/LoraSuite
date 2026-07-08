@@ -89,7 +89,7 @@ describe("createEngineClient", () => {
     });
     const client = createEngineClient("http://engine.test", fetchMock);
 
-    await client.scanInstagramBrowserUrl("https://www.instagram.com/reel/example/", "chrome");
+    await client.scanInstagramBrowserUrl("https://www.instagram.com/reel/example/", "chrome", 8);
 
     expect(fetchMock).toHaveBeenCalledWith("http://engine.test/ingress/instagram/browser-scan", {
       method: "POST",
@@ -97,6 +97,7 @@ describe("createEngineClient", () => {
       body: JSON.stringify({
         url: "https://www.instagram.com/reel/example/",
         browser: "chrome",
+        limit: 8,
       }),
     });
   });

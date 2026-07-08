@@ -152,6 +152,93 @@ describe("DataIngressTab", () => {
     expect(screen.getByLabelText("Select as voice: example reel")).toBeChecked();
   });
 
+  it("sends the selected Instagram scan limit to the engine", async () => {
+    const user = userEvent.setup();
+    const scanInstagramBrowserUrl = vi.fn().mockResolvedValue({
+      id: "scan_1",
+      candidates: [],
+      errors: [],
+    });
+    const engine = engineWith({ scanInstagramBrowserUrl });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.type(
+      screen.getByLabelText("Instagram URL"),
+      "https://www.instagram.com/marysuecurtis/reels/",
+    );
+    await user.clear(screen.getByLabelText("Scan limit"));
+    await user.type(screen.getByLabelText("Scan limit"), "8");
+    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+
+    expect(scanInstagramBrowserUrl).toHaveBeenCalledWith(
+      "https://www.instagram.com/marysuecurtis/reels/",
+      "chrome",
+      8,
+    );
+  });
+
+  it("opens a source preview for video candidates", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramVideoCandidate, instagramPosterCandidate, instagramVoiceCandidate],
+        errors: [],
+      }),
+    });
+
+    const { container } = render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+    await user.click(screen.getByRole("button", { name: "Preview video: example reel" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Video preview: example reel" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
+      "https://www.instagram.com/reel/example/",
+    );
+  });
+
+  it("renders delayed enlarged image previews for thumbnails", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [instagramPosterCandidate],
+        errors: [],
+      }),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+
+    expect(screen.getByAltText("Enlarged preview for example reel poster")).toHaveClass(
+      "hover-preview",
+    );
+  });
+
   it("keeps helper payload and manual path fallback behind advanced controls", async () => {
     const user = userEvent.setup();
     const engine = engineWith();

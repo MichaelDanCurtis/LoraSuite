@@ -45,6 +45,8 @@ export function DataIngressTab({
   const [showAdvancedFallbacks, setShowAdvancedFallbacks] = useState(false);
   const [instagramUrl, setInstagramUrl] = useState("");
   const [instagramBrowser, setInstagramBrowser] = useState("chrome");
+  const [instagramScanLimit, setInstagramScanLimit] = useState("24");
+  const [videoPreviewItem, setVideoPreviewItem] = useState<CandidateReviewItem | null>(null);
   const [instagramPayloadText, setInstagramPayloadText] = useState(
     '{\n  "helper_version": "fixture",\n  "media": []\n}',
   );
@@ -142,10 +144,15 @@ export function DataIngressTab({
       setStatus("Enter an Instagram URL.");
       return;
     }
+    const scanLimit = parseScanLimit(instagramScanLimit);
+    if (scanLimit === null) {
+      setStatus("Enter a scan limit between 1 and 100.");
+      return;
+    }
 
     try {
       setStatus("Scanning Instagram URL with browser cookies.");
-      const result = await engine.scanInstagramBrowserUrl(url, instagramBrowser);
+      const result = await engine.scanInstagramBrowserUrl(url, instagramBrowser, scanLimit);
       applyScanResult(result.candidates);
       setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
     } catch (error) {
@@ -340,6 +347,16 @@ export function DataIngressTab({
               </option>
             ))}
           </select>
+          <label htmlFor="instagram-scan-limit">Scan limit</label>
+          <input
+            id="instagram-scan-limit"
+            min="1"
+            max="100"
+            step="1"
+            type="number"
+            value={instagramScanLimit}
+            onChange={(event) => setInstagramScanLimit(event.target.value)}
+          />
           <button type="button" onClick={scanInstagramBrowserUrl}>
             Scan Instagram URL
           </button>
@@ -479,6 +496,7 @@ export function DataIngressTab({
                 selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
+                onPreviewVideo={setVideoPreviewItem}
               />
             )}
             {viewMode === "list" && (
@@ -487,6 +505,7 @@ export function DataIngressTab({
                 selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
+                onPreviewVideo={setVideoPreviewItem}
               />
             )}
             {viewMode === "gallery" && galleryItem && (
@@ -497,6 +516,7 @@ export function DataIngressTab({
                 selectedIds={selectedIds}
                 assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
+                onPreviewVideo={setVideoPreviewItem}
                 onPrevious={() => setGalleryIndex(Math.max(0, safeGalleryIndex - 1))}
                 onNext={() =>
                   setGalleryIndex(Math.min(visibleReviewItems.length - 1, safeGalleryIndex + 1))
@@ -506,6 +526,13 @@ export function DataIngressTab({
           </>
         )}
       </div>
+
+      {videoPreviewItem && (
+        <VideoPreviewDialog
+          item={videoPreviewItem}
+          onClose={() => setVideoPreviewItem(null)}
+        />
+      )}
 
       <div className="jobs-panel">
         <h3>Ingress Jobs</h3>
@@ -549,9 +576,16 @@ interface CandidateViewProps {
   selectedIds: Set<string>;
   assetUrl(path: string): string;
   onToggleCandidate(candidateId: string): void;
+  onPreviewVideo(item: CandidateReviewItem): void;
 }
 
-function TileView({ items, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
+function TileView({
+  items,
+  selectedIds,
+  assetUrl,
+  onToggleCandidate,
+  onPreviewVideo,
+}: CandidateViewProps) {
   return (
     <div className="candidate-grid">
       {items.map((item) => (
@@ -563,6 +597,7 @@ function TileView({ items, selectedIds, assetUrl, onToggleCandidate }: Candidate
               selectedIds={selectedIds}
               onToggleCandidate={onToggleCandidate}
             />
+            <VideoPreviewButton item={item} onPreviewVideo={onPreviewVideo} />
             <strong>{item.displayName}</strong>
             <span>{reviewItemSummary(item)}</span>
             <RoleStatusBadges item={item} />
@@ -573,7 +608,13 @@ function TileView({ items, selectedIds, assetUrl, onToggleCandidate }: Candidate
   );
 }
 
-function ListView({ items, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
+function ListView({
+  items,
+  selectedIds,
+  assetUrl,
+  onToggleCandidate,
+  onPreviewVideo,
+}: CandidateViewProps) {
   return (
     <table className="candidate-list" aria-label="Candidate list">
       <thead>
@@ -599,6 +640,7 @@ function ListView({ items, selectedIds, assetUrl, onToggleCandidate }: Candidate
                 selectedIds={selectedIds}
                 onToggleCandidate={onToggleCandidate}
               />
+              <VideoPreviewButton item={item} onPreviewVideo={onPreviewVideo} />
             </td>
             <td>{item.displayName}</td>
             <td>{roleSummary(item)}</td>
@@ -621,6 +663,7 @@ interface GalleryViewProps {
   selectedIds: Set<string>;
   assetUrl(path: string): string;
   onToggleCandidate(candidateId: string): void;
+  onPreviewVideo(item: CandidateReviewItem): void;
   onPrevious(): void;
   onNext(): void;
 }
@@ -632,6 +675,7 @@ function GalleryView({
   selectedIds,
   assetUrl,
   onToggleCandidate,
+  onPreviewVideo,
   onPrevious,
   onNext,
 }: GalleryViewProps) {
@@ -651,6 +695,7 @@ function GalleryView({
           selectedIds={selectedIds}
           onToggleCandidate={onToggleCandidate}
         />
+        <VideoPreviewButton item={item} onPreviewVideo={onPreviewVideo} />
         <div className="gallery-controls">
           <button type="button" onClick={onPrevious} disabled={currentIndex === 0}>
             Previous
@@ -730,10 +775,74 @@ function CandidateThumbnail({
   return (
     <div className={large ? "candidate-thumb large" : "candidate-thumb"}>
       {thumbnail ? (
-        <img src={thumbnail} alt="" />
+        <>
+          <img className="thumbnail-image" src={thumbnail} alt="" />
+          <img
+            className="hover-preview"
+            src={thumbnail}
+            alt={`Enlarged preview for ${candidate.display_name}`}
+          />
+        </>
       ) : (
         <span>{candidate.media_type ?? "file"}</span>
       )}
+    </div>
+  );
+}
+
+function VideoPreviewButton({
+  item,
+  onPreviewVideo,
+}: {
+  item: CandidateReviewItem;
+  onPreviewVideo(item: CandidateReviewItem): void;
+}) {
+  if (!item.videoCandidate) {
+    return null;
+  }
+  return (
+    <button
+      className="preview-action"
+      type="button"
+      aria-label={`Preview video: ${item.displayName}`}
+      onClick={() => onPreviewVideo(item)}
+    >
+      Preview video
+    </button>
+  );
+}
+
+function VideoPreviewDialog({
+  item,
+  onClose,
+}: {
+  item: CandidateReviewItem;
+  onClose(): void;
+}) {
+  const previewUrl = item.videoCandidate?.source_locator ?? item.sourceLocator;
+  return (
+    <div className="video-preview-backdrop">
+      <div
+        className="video-preview-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Video preview: ${item.displayName}`}
+      >
+        <div className="video-preview-header">
+          <h3>{item.displayName}</h3>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <iframe
+          title={`Video preview: ${item.displayName}`}
+          src={previewUrl}
+          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+        />
+        <a href={previewUrl} target="_blank" rel="noreferrer">
+          Open source in browser
+        </a>
+      </div>
     </div>
   );
 }
@@ -753,6 +862,14 @@ function modeLabel(mode: ViewMode): string {
 
 function browserLabel(browser: string): string {
   return browser[0].toUpperCase() + browser.slice(1);
+}
+
+function parseScanLimit(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    return null;
+  }
+  return parsed;
 }
 
 function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[] {
