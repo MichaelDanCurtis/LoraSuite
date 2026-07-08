@@ -614,6 +614,8 @@ def _media_item_from_ytdlp_entry(
         "browser_source": browser,
         "extractor": "yt-dlp",
     }
+    if media_type == "video":
+        item.update(_instagram_audio_metadata(entry))
     return {key: value for key, value in item.items() if value is not None}
 
 
@@ -649,6 +651,8 @@ def _media_item_from_instagram_clip(
         "browser_source": browser,
         "extractor": "instagram-web-api",
     }
+    if media_type == "video":
+        item.update(_instagram_audio_metadata(entry))
     return {key: value for key, value in item.items() if value is not None}
 
 
@@ -692,6 +696,8 @@ def _media_item_from_instagram_profile_node(
         "browser_source": browser,
         "extractor": "instagram-web-api",
     }
+    if is_video:
+        item.update(_instagram_audio_metadata(entry))
     return {key: value for key, value in item.items() if value is not None}
 
 
@@ -787,6 +793,109 @@ def _best_instagram_video_url(entry: dict[str, Any]) -> str | None:
         url = version.get("url")
         if isinstance(url, str) and url:
             return url
+    return None
+
+
+def _instagram_audio_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+    clips_metadata = entry.get("clips_metadata")
+    if not isinstance(clips_metadata, dict):
+        clips_metadata = {}
+
+    music_info = _first_dict(clips_metadata.get("music_info"), entry.get("music_info"))
+    music_asset = (
+        _first_dict(music_info.get("music_asset_info")) if music_info is not None else None
+    )
+    original_sound_info = _first_dict(
+        clips_metadata.get("original_sound_info"),
+        entry.get("original_sound_info"),
+    )
+    audio_type = _first_string(clips_metadata.get("audio_type"), entry.get("audio_type"))
+    audio_original = _instagram_audio_original(audio_type, music_info, original_sound_info)
+    audio_label = _instagram_audio_label(music_asset, original_sound_info)
+
+    metadata: dict[str, Any] = {
+        "audio_original": audio_original,
+        "audio_kind": _instagram_audio_kind(audio_original),
+        "audio_label": audio_label,
+        "audio_type": audio_type,
+    }
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _instagram_audio_original(
+    audio_type: str | None,
+    music_info: dict[str, Any] | None,
+    original_sound_info: dict[str, Any] | None,
+) -> bool | None:
+    explicit_original = _first_bool(
+        original_sound_info.get("is_original_audio") if original_sound_info else None,
+        original_sound_info.get("is_creator_audio") if original_sound_info else None,
+    )
+    if explicit_original is not None:
+        return explicit_original
+
+    normalized_audio_type = audio_type.lower() if audio_type else ""
+    if music_info is not None or "music" in normalized_audio_type or "licensed" in normalized_audio_type:
+        return False
+    if original_sound_info is not None or "original" in normalized_audio_type:
+        return True
+    return None
+
+
+def _instagram_audio_kind(audio_original: bool | None) -> str | None:
+    if audio_original is True:
+        return "original"
+    if audio_original is False:
+        return "reused_or_music"
+    return None
+
+
+def _instagram_audio_label(
+    music_asset: dict[str, Any] | None,
+    original_sound_info: dict[str, Any] | None,
+) -> str | None:
+    source = music_asset or original_sound_info
+    if source is None:
+        return None
+
+    title = _first_string(
+        source.get("title"),
+        source.get("audio_cluster_title"),
+        source.get("original_audio_title"),
+        source.get("display_name"),
+    )
+    artist = _first_string(
+        source.get("artist_name"),
+        source.get("display_artist"),
+        source.get("username"),
+    )
+    ig_artist = source.get("ig_artist")
+    if artist is None and isinstance(ig_artist, dict):
+        artist = _first_string(ig_artist.get("full_name"), ig_artist.get("username"))
+
+    if title and artist:
+        return f"{title} - {artist}"
+    return title or artist
+
+
+def _first_dict(*values: Any) -> dict[str, Any] | None:
+    for value in values:
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _first_string(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _first_bool(*values: Any) -> bool | None:
+    for value in values:
+        if isinstance(value, bool):
+            return value
     return None
 
 

@@ -145,6 +145,15 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
                                 },
                             ]
                         },
+                        "clips_metadata": {
+                            "audio_type": "licensed_music",
+                            "music_info": {
+                                "music_asset_info": {
+                                    "title": "Trending sound",
+                                    "artist_name": "Someone Else",
+                                }
+                            },
+                        },
                     }
                 }
             ]
@@ -213,6 +222,10 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     assert audio.media_type == MediaType.AUDIO
     assert audio.selected is False
     assert audio.metadata_json["download_url"] == "https://cdninstagram.example/reel-large.mp4"
+    assert video.metadata_json["audio_original"] is False
+    assert video.metadata_json["audio_kind"] == "reused_or_music"
+    assert video.metadata_json["audio_label"] == "Trending sound - Someone Else"
+    assert audio.metadata_json["audio_original"] is False
 
 
 def test_instagram_browser_scan_reads_profile_photos_with_browser_cookies(tmp_path):

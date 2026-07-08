@@ -71,6 +71,41 @@ describe("DataIngressTab", () => {
       asset_role: "video_audio",
     },
   };
+  const nonOriginalAudioVideoCandidate: IngressCandidate = {
+    ...instagramVideoCandidate,
+    id: "candidate_reused_audio_video",
+    display_name: "reused audio reel",
+    metadata_json: {
+      ...instagramVideoCandidate.metadata_json,
+      audio_original: false,
+      audio_kind: "reused_or_music",
+      audio_label: "Trending sound",
+    },
+  };
+  const nonOriginalAudioPosterCandidate: IngressCandidate = {
+    ...instagramPosterCandidate,
+    id: "candidate_reused_audio_poster",
+    display_name: "reused audio reel poster",
+    metadata_json: {
+      ...instagramPosterCandidate.metadata_json,
+      source_video_candidate_id: "candidate_reused_audio_video",
+      audio_original: false,
+      audio_kind: "reused_or_music",
+      audio_label: "Trending sound",
+    },
+  };
+  const nonOriginalAudioVoiceCandidate: IngressCandidate = {
+    ...instagramVoiceCandidate,
+    id: "candidate_reused_audio_voice",
+    display_name: "reused audio reel voice",
+    metadata_json: {
+      ...instagramVoiceCandidate.metadata_json,
+      source_video_candidate_id: "candidate_reused_audio_video",
+      audio_original: false,
+      audio_kind: "reused_or_music",
+      audio_label: "Trending sound",
+    },
+  };
 
   function engineWith(overrides: Partial<EngineClient> = {}): EngineClient {
     return {
@@ -256,6 +291,21 @@ describe("DataIngressTab", () => {
 
     expect(screen.getByLabelText("Manual path fallback")).toBeInTheDocument();
     expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps ingress counters in the top header", () => {
+    render(
+      <DataIngressTab
+        engine={engineWith()}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByLabelText("Ingress summary");
+
+    expect(summary.closest(".section-header")).not.toBeNull();
+    expect(summary.closest(".ingress-status-strip")).toBeNull();
   });
 
   it("selects the media destination with a folder picker", async () => {
@@ -542,9 +592,47 @@ describe("DataIngressTab", () => {
     expect(
       screen.getByRole("dialog", { name: "Video preview: example reel" }),
     ).toBeInTheDocument();
-    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
-      "https://www.instagram.com/reel/example/",
+    expect(container.querySelector("video")?.getAttribute("src")).toBe(
+      "https://cdninstagram.example/video.mp4",
     );
+    expect(container.querySelector("iframe")).toBeNull();
+  });
+
+  it("dims reels with non-original audio while keeping voice selectable", async () => {
+    const user = userEvent.setup();
+    const engine = engineWith({
+      scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [
+          nonOriginalAudioVideoCandidate,
+          nonOriginalAudioPosterCandidate,
+          nonOriginalAudioVoiceCandidate,
+        ],
+        errors: [],
+      }),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await scanInstagramUrl(user);
+
+    const tile = screen.getByRole("article", { name: "reused audio reel" });
+    const voiceSelector = screen.getByLabelText("Select as voice: reused audio reel");
+
+    expect(tile).toHaveClass("audio-not-original");
+    expect(voiceSelector.closest(".role-chip")).toHaveClass("audio-ineligible");
+    expect(voiceSelector).not.toBeDisabled();
+    expect(voiceSelector).not.toBeChecked();
+
+    await user.click(voiceSelector);
+
+    expect(voiceSelector).toBeChecked();
   });
 
   it("renders delayed enlarged image previews for thumbnails", async () => {

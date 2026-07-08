@@ -399,9 +399,29 @@ export function DataIngressTab({
 
   return (
     <section className="workspace-section ingress-workspace">
-      <div className="section-header">
-        <h2>Data Ingress</h2>
-        <p>Scan local media, review candidates, then confirm only what should enter the vault.</p>
+      <div className="section-header ingress-header">
+        <div>
+          <h2>Data Ingress</h2>
+          <p>Scan local media, review candidates, then confirm only what should enter the vault.</p>
+        </div>
+        <dl className="metric-grid" aria-label="Ingress summary">
+          <div>
+            <dt>Imported</dt>
+            <dd>{mediaItems.length}</dd>
+          </div>
+          <div>
+            <dt>Candidates</dt>
+            <dd>{candidates.length}</dd>
+          </div>
+          <div>
+            <dt>Selected</dt>
+            <dd>{selectedReadyCount}</dd>
+          </div>
+          <div>
+            <dt>Skipped</dt>
+            <dd>{skippedCount}</dd>
+          </div>
+        </dl>
       </div>
 
       <div className="ingress-topbar" aria-label="Ingress source actions">
@@ -568,25 +588,6 @@ export function DataIngressTab({
         <p aria-live="polite" className="status-line">
           {status}
         </p>
-
-        <dl className="metric-grid" aria-label="Ingress summary">
-          <div>
-            <dt>Imported</dt>
-            <dd>{mediaItems.length}</dd>
-          </div>
-          <div>
-            <dt>Candidates</dt>
-            <dd>{candidates.length}</dd>
-          </div>
-          <div>
-            <dt>Selected</dt>
-            <dd>{selectedReadyCount}</dd>
-          </div>
-          <div>
-            <dt>Skipped</dt>
-            <dd>{skippedCount}</dd>
-          </div>
-        </dl>
       </div>
 
       <div className="ingress-layout">
@@ -725,6 +726,7 @@ export function DataIngressTab({
       {videoPreviewItem && (
         <VideoPreviewDialog
           item={videoPreviewItem}
+          assetUrl={engine.assetUrl}
           onClose={() => setVideoPreviewItem(null)}
         />
       )}
@@ -784,7 +786,11 @@ function TileView({
   return (
     <div className="candidate-grid">
       {items.map((item) => (
-        <article className="candidate-tile" key={item.id} aria-label={item.displayName}>
+        <article
+          className={candidateReviewClassName("candidate-tile", item)}
+          key={item.id}
+          aria-label={item.displayName}
+        >
           <div className="candidate-media">
             <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
             <RoleSelectors
@@ -822,7 +828,7 @@ function ListView({
       </thead>
       <tbody>
         {items.map((item) => (
-          <tr key={item.id}>
+          <tr className={candidateReviewClassName("", item)} key={item.id}>
             <td>
               <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} />
             </td>
@@ -867,7 +873,7 @@ function GalleryView({
   onNext,
 }: GalleryViewProps) {
   return (
-    <div className="gallery-review">
+    <div className={candidateReviewClassName("gallery-review", item)}>
       <CandidateThumbnail candidate={item.thumbnailCandidate} assetUrl={assetUrl} large />
       <div className="gallery-details">
         <p className="muted">
@@ -914,7 +920,7 @@ function RoleSelectors({
         const label = `Select as ${displayRole}: ${item.displayName}`;
         return (
           <label
-            className={`role-chip ${selectedIds.has(candidate.id) ? "selected" : ""}`}
+            className={roleChipClassName(item, role, selectedIds.has(candidate.id))}
             key={role}
           >
             <input
@@ -991,12 +997,15 @@ function VideoPreviewButton({
 
 function VideoPreviewDialog({
   item,
+  assetUrl,
   onClose,
 }: {
   item: CandidateReviewItem;
+  assetUrl(path: string): string;
   onClose(): void;
 }) {
-  const previewUrl = item.videoCandidate?.source_locator ?? item.sourceLocator;
+  const previewUrl = videoPreviewUrl(item, assetUrl);
+  const sourceUrl = item.videoCandidate?.source_locator ?? item.sourceLocator;
   return (
     <div className="video-preview-backdrop">
       <div
@@ -1011,12 +1020,15 @@ function VideoPreviewDialog({
             Close
           </button>
         </div>
-        <iframe
+        <video
           title={`Video preview: ${item.displayName}`}
+          controls
+          autoPlay
+          playsInline
+          preload="metadata"
           src={previewUrl}
-          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
         />
-        <a href={previewUrl} target="_blank" rel="noreferrer">
+        <a href={sourceUrl} target="_blank" rel="noreferrer">
           Open source in browser
         </a>
       </div>
@@ -1165,6 +1177,59 @@ function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidat
     }
   }
   return [...candidatesById.values()];
+}
+
+function candidateReviewClassName(baseClassName: string, item: CandidateReviewItem): string {
+  return [baseClassName, hasNonOriginalAudio(item) ? "audio-not-original" : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function roleChipClassName(
+  item: CandidateReviewItem,
+  role: CandidateRole,
+  selected: boolean,
+): string {
+  return [
+    "role-chip",
+    selected ? "selected" : "",
+    role === "audio" && hasNonOriginalAudio(item) ? "audio-ineligible" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hasNonOriginalAudio(item: CandidateReviewItem): boolean {
+  return candidateAudioOriginal(item.audioCandidate ?? item.videoCandidate) === false;
+}
+
+function candidateAudioOriginal(candidate: IngressCandidate | undefined): boolean | undefined {
+  const rawOriginal = candidate?.metadata_json?.audio_original;
+  if (typeof rawOriginal === "boolean") return rawOriginal;
+  if (typeof rawOriginal === "string") {
+    const normalized = rawOriginal.toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+
+  const audioKind = candidate?.metadata_json?.audio_kind;
+  if (audioKind === "original") return true;
+  if (audioKind === "reused_or_music" || audioKind === "music") return false;
+  return undefined;
+}
+
+function videoPreviewUrl(item: CandidateReviewItem, assetUrl: (path: string) => string): string {
+  const videoCandidate = item.videoCandidate;
+  const downloadUrl = videoCandidate?.metadata_json?.download_url;
+  if (typeof downloadUrl === "string" && downloadUrl.trim()) {
+    return downloadUrl;
+  }
+
+  const sourceLocator = videoCandidate?.source_locator ?? item.sourceLocator;
+  if (sourceLocator.startsWith("/")) {
+    return assetUrl(sourceLocator);
+  }
+  return sourceLocator;
 }
 
 function roleLabel(role: CandidateRole): string {

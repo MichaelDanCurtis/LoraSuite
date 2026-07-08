@@ -120,6 +120,11 @@ h2 {
   margin-bottom: 22px;
 }
 
+.ingress-header {
+  grid-template-columns: minmax(260px, 1fr) minmax(360px, 520px);
+  align-items: start;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -371,10 +376,7 @@ fieldset input {
 }
 
 .ingress-status-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
-  gap: 14px;
-  align-items: start;
+  display: block;
 }
 
 .field-row {
@@ -543,6 +545,22 @@ fieldset input {
   background: #ffffff;
 }
 
+.candidate-tile.audio-not-original {
+  border-color: #c4cbc5;
+  background: #f0f2ef;
+}
+
+.candidate-tile.audio-not-original .candidate-thumb,
+.candidate-tile.audio-not-original .candidate-body,
+.candidate-list tr.audio-not-original .candidate-thumb,
+.candidate-list tr.audio-not-original .list-title-cell,
+.candidate-list tr.audio-not-original .path-cell,
+.gallery-review.audio-not-original .candidate-thumb,
+.gallery-review.audio-not-original .gallery-details > :not(.role-selectors, .preview-action, .gallery-controls) {
+  opacity: 0.46;
+  filter: grayscale(0.9);
+}
+
 .candidate-media {
   position: relative;
 }
@@ -681,6 +699,12 @@ fieldset input {
   border-color: #225c63;
   color: #ffffff;
   background: rgb(39 106 114 / 92%);
+}
+
+.role-chip.audio-ineligible:not(.selected) {
+  border-style: dashed;
+  color: #4e595f;
+  background: rgb(238 242 238 / 90%);
 }
 
 .role-chip input {
@@ -859,7 +883,7 @@ fieldset input {
   background: #ffffff;
 }
 
-.video-preview-dialog iframe {
+.video-preview-dialog video {
   width: 100%;
   min-height: min(70vh, 720px);
   border: 1px solid #d7ddd6;
@@ -916,6 +940,7 @@ fieldset input {
   }
 
   .ingress-topbar,
+  .ingress-header,
   .ingress-status-strip,
   .destination-row {
     grid-template-columns: 1fr;

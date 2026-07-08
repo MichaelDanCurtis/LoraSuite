@@ -93,6 +93,7 @@ def _candidate_from_item(
             "poster_source_url": item.get("poster_url") or item.get("thumbnail_url"),
             "browser_source": item.get("browser_source"),
             "extractor": item.get("extractor"),
+            **_audio_metadata_from_item(item),
         },
     )
 
@@ -134,6 +135,22 @@ def _audio_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
             "asset_role": "video_audio",
         },
     )
+
+
+def _audio_metadata_from_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    audio_metadata: dict[str, Any] = {}
+    for key in (
+        "audio_original",
+        "audio_kind",
+        "audio_label",
+        "audio_type",
+        "audio_title",
+        "audio_artist",
+    ):
+        value = item.get(key)
+        if value is not None:
+            audio_metadata[key] = value
+    return audio_metadata
 
 
 def _cache_preview_asset(
