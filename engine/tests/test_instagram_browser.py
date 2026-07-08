@@ -48,9 +48,10 @@ def test_instagram_browser_scan_caches_thumbnail_candidates(tmp_path):
     )
 
     assert calls == [("https://www.instagram.com/reel/C123/", "chrome")]
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == 3
     video = result.candidates[0]
     poster = result.candidates[1]
+    audio = result.candidates[2]
     assert video.source_kind == SourceKind.INSTAGRAM
     assert video.media_type == MediaType.VIDEO
     assert video.poster_asset_path is not None
@@ -58,6 +59,10 @@ def test_instagram_browser_scan_caches_thumbnail_candidates(tmp_path):
     assert poster.media_type == MediaType.IMAGE
     assert poster.selected is True
     assert poster.metadata_json["local_import_path"] == str(video.poster_asset_path)
+    assert audio.media_type == MediaType.AUDIO
+    assert audio.selected is False
+    assert audio.metadata_json["source_video_candidate_id"] == video.id
+    assert audio.metadata_json["asset_role"] == "video_audio"
     assert video.metadata_json["browser_source"] == "chrome"
 
 
@@ -125,9 +130,10 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     )
 
     assert calls == [("marysuecurtis", "chrome", 24)]
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == 3
     video = result.candidates[0]
     poster = result.candidates[1]
+    audio = result.candidates[2]
     assert video.source_kind == SourceKind.INSTAGRAM
     assert video.source_locator == "https://www.instagram.com/reel/DQnwFHVAG9e/"
     assert video.media_type == MediaType.VIDEO
@@ -142,6 +148,9 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     assert video.metadata_json["download_url"] == "https://cdninstagram.example/reel-large.mp4"
     assert poster.media_type == MediaType.IMAGE
     assert poster.selected is True
+    assert audio.media_type == MediaType.AUDIO
+    assert audio.selected is False
+    assert audio.metadata_json["download_url"] == "https://cdninstagram.example/reel-large.mp4"
 
 
 def test_instagram_browser_scan_reads_profile_photos_with_browser_cookies(tmp_path):

@@ -209,9 +209,10 @@ def test_instagram_helper_scan_endpoint_returns_poster_candidates(client, tmp_pa
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["candidates"]) == 2
+    assert len(body["candidates"]) == 3
     assert body["candidates"][0]["source_kind"] == "instagram"
     assert body["candidates"][1]["media_type"] == "image"
+    assert body["candidates"][2]["media_type"] == "audio"
 
 
 def test_instagram_helper_scan_endpoint_stores_poster_candidates_for_jobs(
@@ -290,7 +291,7 @@ def test_ingress_candidates_endpoint_filters_instagram_candidates(client, tmp_pa
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["candidates"]) == 2
+    assert len(body["candidates"]) == 3
     assert {candidate["source_kind"] for candidate in body["candidates"]} == {
         "instagram"
     }

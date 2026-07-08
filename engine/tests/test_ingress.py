@@ -240,6 +240,86 @@ def test_ingress_job_downloads_selected_social_video_original(tmp_path, monkeypa
     assert (tmp_path / "vault" / "downloads" / "instagram" / f"{candidate.id}.mp4").read_bytes() == video_bytes
 
 
+def test_ingress_job_extracts_selected_social_audio_from_video(tmp_path, monkeypatch):
+    video_bytes = b"fake mp4 bytes"
+    audio_bytes = b"fake m4a bytes"
+    service = IngressService(tmp_path / "vault")
+    candidate = IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator="https://www.instagram.com/reel/example/#audio",
+        display_name="example reel voice",
+        media_type=MediaType.AUDIO,
+        duration=9.5,
+        selected=True,
+        metadata_json={
+            "download_url": "https://cdninstagram.example/video.mp4",
+            "helper_version": "lorasuite-instagram-web-api-v0",
+            "platform_media_id": "ig_video_1",
+            "source_video_candidate_id": "candidate_video",
+            "asset_role": "video_audio",
+        },
+    )
+    service.store_candidates([candidate])
+
+    class FakeHeaders:
+        def get(self, _name: str, _default=None):
+            return str(len(video_bytes))
+
+        def get_content_type(self) -> str:
+            return "video/mp4"
+
+    class FakeResponse:
+        headers = FakeHeaders()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            if getattr(self, "sent", False):
+                return b""
+            self.sent = True
+            return video_bytes
+
+    def fake_urlopen(_request, *, timeout: int, context):
+        assert timeout == 120
+        assert context is not None
+        return FakeResponse()
+
+    def fake_extract_audio(
+        _self: IngressService,
+        video_path: Path,
+        audio_path: Path,
+    ) -> Path:
+        assert video_path.name.endswith(".mp4")
+        assert audio_path.name == f"{candidate.id}.m4a"
+        audio_path.write_bytes(audio_bytes)
+        return audio_path
+
+    monkeypatch.setattr(ingress_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        IngressService,
+        "_extract_audio_from_video",
+        fake_extract_audio,
+        raising=False,
+    )
+
+    job = service.create_job(SourceKind.INSTAGRAM, [candidate.id])
+    completed = service.process_job(job.id)
+
+    assert completed.status == IngressJobStatus.COMPLETE
+    assert completed.imported_count == 1
+    assert completed.failed_count == 0
+    assert completed.deferred_count == 0
+    imported = completed.imported_media_items[0]
+    assert imported.media_type == MediaType.AUDIO
+    assert imported.raw_path.read_bytes() == audio_bytes
+    assert imported.metadata_json["original_path"].endswith(f"{candidate.id}.m4a")
+    assert (tmp_path / "vault" / "downloads" / "instagram" / f"{candidate.id}.m4a").read_bytes() == audio_bytes
+
+
 def test_ingress_job_downloads_selected_social_image_original(tmp_path, monkeypatch):
     buffer = BytesIO()
     Image.new("RGB", (48, 64), color=(30, 120, 200)).save(buffer, "JPEG")

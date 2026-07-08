@@ -5,8 +5,8 @@ import type { EngineClient } from "../lib/api";
 import type { IngressCandidate, IngressJob, MediaItem } from "../lib/types";
 
 type ViewMode = "tile" | "list" | "gallery";
-type MediaFilter = "all" | "image" | "video";
-type CandidateRole = "image" | "video";
+type MediaFilter = "all" | "image" | "video" | "audio";
+type CandidateRole = "image" | "video" | "audio";
 
 interface CandidateReviewItem {
   id: string;
@@ -14,6 +14,7 @@ interface CandidateReviewItem {
   sourceLocator: string;
   imageCandidate?: IngressCandidate;
   videoCandidate?: IngressCandidate;
+  audioCandidate?: IngressCandidate;
   thumbnailCandidate: IngressCandidate;
   candidates: IngressCandidate[];
 }
@@ -65,6 +66,9 @@ export function DataIngressTab({
   );
   const hasVisibleVideoCandidates = visibleReviewItems.some((item) =>
     candidateForRole(item, "video"),
+  );
+  const hasVisibleAudioCandidates = visibleReviewItems.some((item) =>
+    candidateForRole(item, "audio"),
   );
 
   async function chooseFiles() {
@@ -397,6 +401,7 @@ export function DataIngressTab({
             <option value="all">All</option>
             <option value="image">Images</option>
             <option value="video">Videos</option>
+            <option value="audio">Voice</option>
           </select>
         </label>
 
@@ -416,6 +421,13 @@ export function DataIngressTab({
           disabled={!hasVisibleVideoCandidates}
         >
           Select All Videos
+        </button>
+        <button
+          type="button"
+          onClick={() => selectVisibleRoleCandidates("audio")}
+          disabled={!hasVisibleAudioCandidates}
+        >
+          Select All Voice
         </button>
         <button type="button" onClick={deselectVisibleCandidates} disabled={!hasVisibleItems}>
           Deselect All
@@ -661,13 +673,14 @@ function RoleSelectors({
   selectedIds: Set<string>;
   onToggleCandidate(candidateId: string): void;
 }) {
-  const roles: CandidateRole[] = ["image", "video"];
+  const roles: CandidateRole[] = ["image", "video", "audio"];
   return (
     <div className="role-selectors">
       {roles.map((role) => {
         const candidate = candidateForRole(item, role);
         if (!candidate) return null;
-        const label = `Select as ${role}: ${item.displayName}`;
+        const displayRole = roleLabel(role);
+        const label = `Select as ${displayRole}: ${item.displayName}`;
         return (
           <label key={role}>
             <input
@@ -677,7 +690,7 @@ function RoleSelectors({
               disabled={candidate.status !== "ready"}
               onChange={() => onToggleCandidate(candidate.id)}
             />
-            Select as {role}
+            Select as {displayRole}
           </label>
         );
       })}
@@ -686,7 +699,7 @@ function RoleSelectors({
 }
 
 function RoleStatusBadges({ item }: { item: CandidateReviewItem }) {
-  const roles: CandidateRole[] = ["image", "video"];
+  const roles: CandidateRole[] = ["image", "video", "audio"];
   return (
     <div className="role-statuses">
       {roles.map((role) => {
@@ -694,7 +707,7 @@ function RoleStatusBadges({ item }: { item: CandidateReviewItem }) {
         if (!candidate) return null;
         return (
           <span className="role-status" key={role}>
-            <span className="role-name">{role}</span>
+            <span className="role-name">{roleLabel(role)}</span>
             <StatusBadge candidate={candidate} />
           </span>
         );
@@ -745,6 +758,7 @@ function browserLabel(browser: string): string {
 function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[] {
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const posterByVideoCandidateId = new Map<string, IngressCandidate>();
+  const audioByVideoCandidateId = new Map<string, IngressCandidate>();
   for (const candidate of candidates) {
     const videoCandidateId = sourceVideoCandidateId(candidate);
     if (
@@ -753,6 +767,13 @@ function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[]
       candidatesById.has(videoCandidateId)
     ) {
       posterByVideoCandidateId.set(videoCandidateId, candidate);
+    }
+    if (
+      candidate.media_type === "audio" &&
+      videoCandidateId &&
+      candidatesById.has(videoCandidateId)
+    ) {
+      audioByVideoCandidateId.set(videoCandidateId, candidate);
     }
   }
 
@@ -767,16 +788,23 @@ function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[]
     }
 
     const posterCandidate = posterByVideoCandidateId.get(candidate.id);
+    const audioCandidate = audioByVideoCandidateId.get(candidate.id);
     if (candidate.media_type === "video") {
-      const itemCandidates = posterCandidate ? [posterCandidate, candidate] : [candidate];
+      const itemCandidates = [
+        ...(posterCandidate ? [posterCandidate] : []),
+        candidate,
+        ...(audioCandidate ? [audioCandidate] : []),
+      ];
       consumedIds.add(candidate.id);
       if (posterCandidate) consumedIds.add(posterCandidate.id);
+      if (audioCandidate) consumedIds.add(audioCandidate.id);
       items.push({
         id: candidate.id,
         displayName: candidate.display_name,
         sourceLocator: candidate.source_locator,
         imageCandidate: posterCandidate,
         videoCandidate: candidate,
+        audioCandidate,
         thumbnailCandidate: posterCandidate ?? candidate,
         candidates: itemCandidates,
       });
@@ -789,6 +817,7 @@ function buildReviewItems(candidates: IngressCandidate[]): CandidateReviewItem[]
       displayName: candidate.display_name,
       sourceLocator: candidate.source_locator,
       imageCandidate: candidate.media_type === "image" ? candidate : undefined,
+      audioCandidate: candidate.media_type === "audio" ? candidate : undefined,
       thumbnailCandidate: candidate,
       candidates: [candidate],
     });
@@ -810,7 +839,9 @@ function candidateForRole(
   item: CandidateReviewItem,
   role: CandidateRole,
 ): IngressCandidate | undefined {
-  return role === "image" ? item.imageCandidate : item.videoCandidate;
+  if (role === "image") return item.imageCandidate;
+  if (role === "video") return item.videoCandidate;
+  return item.audioCandidate;
 }
 
 function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidate[] {
@@ -824,9 +855,13 @@ function candidatesForReviewItems(items: CandidateReviewItem[]): IngressCandidat
 }
 
 function roleSummary(item: CandidateReviewItem): string {
-  const roles: CandidateRole[] = ["image", "video"];
-  const labels = roles.filter((role) => candidateForRole(item, role));
+  const roles: CandidateRole[] = ["image", "video", "audio"];
+  const labels = roles.filter((role) => candidateForRole(item, role)).map(roleLabel);
   return labels.length > 0 ? labels.join(", ") : "unknown";
+}
+
+function roleLabel(role: CandidateRole): string {
+  return role === "audio" ? "voice" : role;
 }
 
 function reviewItemSummary(item: CandidateReviewItem): string {

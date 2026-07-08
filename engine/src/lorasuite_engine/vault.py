@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from lorasuite_engine.models import MediaItem, MediaSource, MediaType, SourceKind
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
+SUPPORTED_AUDIO_SUFFIXES = frozenset({".aac", ".m4a", ".mp3", ".wav"})
 SUPPORTED_VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm"})
 
 
@@ -39,6 +40,8 @@ def detect_media_type(path: Path) -> MediaType | None:
     suffix = path.suffix.lower()
     if suffix in SUPPORTED_IMAGE_SUFFIXES:
         return MediaType.IMAGE
+    if suffix in SUPPORTED_AUDIO_SUFFIXES:
+        return MediaType.AUDIO
     if suffix in SUPPORTED_VIDEO_SUFFIXES:
         return MediaType.VIDEO
     return None

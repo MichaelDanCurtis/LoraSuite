@@ -27,6 +27,7 @@ def scan_instagram_helper_payload(
     vault_root: Path,
     *,
     include_video_posters_as_image_candidates: bool = True,
+    include_video_audio_as_audio_candidates: bool = True,
 ) -> IngressScanResult:
     reject_token_like_fields(payload)
     result = IngressScanResult()
@@ -41,6 +42,8 @@ def scan_instagram_helper_payload(
             and candidate.poster_asset_path is not None
         ):
             result.candidates.append(_poster_candidate(candidate))
+        if include_video_audio_as_audio_candidates and candidate.media_type == MediaType.VIDEO:
+            result.candidates.append(_audio_candidate(candidate))
 
     return result
 
@@ -111,6 +114,24 @@ def _poster_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
             "source_video_candidate_id": video_candidate.id,
             "local_import_path": str(poster_path),
             "asset_role": "video_poster",
+        },
+    )
+
+
+def _audio_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
+    return IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator=f"{video_candidate.source_locator}#audio",
+        display_name=f"{video_candidate.display_name} voice",
+        media_type=MediaType.AUDIO,
+        duration=video_candidate.duration,
+        thumbnail_path=video_candidate.poster_asset_path,
+        status=IngressCandidateStatus.READY,
+        selected=False,
+        metadata_json={
+            **video_candidate.metadata_json,
+            "source_video_candidate_id": video_candidate.id,
+            "asset_role": "video_audio",
         },
     )
 

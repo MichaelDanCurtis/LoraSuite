@@ -41,6 +41,22 @@ describe("DataIngressTab", () => {
       asset_role: "video_poster",
     },
   };
+  const instagramVoiceCandidate: IngressCandidate = {
+    id: "candidate_voice",
+    source_kind: "instagram",
+    source_locator: "https://www.instagram.com/reel/example/#audio",
+    display_name: "example reel voice",
+    media_type: "audio",
+    duration: 9.5,
+    thumbnail_path: "/tmp/vault/previews/social/example.jpg",
+    status: "ready",
+    selected: false,
+    metadata_json: {
+      source_video_candidate_id: "candidate_video",
+      download_url: "https://cdninstagram.example/video.mp4",
+      asset_role: "video_audio",
+    },
+  };
 
   function engineWith(overrides: Partial<EngineClient> = {}): EngineClient {
     return {
@@ -72,7 +88,7 @@ describe("DataIngressTab", () => {
     const engine = engineWith({
       scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
         id: "scan_1",
-        candidates: [instagramVideoCandidate, instagramPosterCandidate],
+        candidates: [instagramVideoCandidate, instagramPosterCandidate, instagramVoiceCandidate],
         errors: [],
       }),
     });
@@ -89,16 +105,18 @@ describe("DataIngressTab", () => {
 
     expect(await screen.findByText("example reel")).toBeInTheDocument();
     expect(screen.queryByText("example reel poster")).not.toBeInTheDocument();
+    expect(screen.queryByText("example reel voice")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Select as image: example reel")).toBeChecked();
     expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
+    expect(screen.getByLabelText("Select as voice: example reel")).not.toBeChecked();
   });
 
-  it("selects all image or video roles independently", async () => {
+  it("selects all image, video, or voice roles independently", async () => {
     const user = userEvent.setup();
     const engine = engineWith({
       scanInstagramBrowserUrl: vi.fn().mockResolvedValue({
         id: "scan_1",
-        candidates: [instagramVideoCandidate, instagramPosterCandidate],
+        candidates: [instagramVideoCandidate, instagramPosterCandidate, instagramVoiceCandidate],
         errors: [],
       }),
     });
@@ -117,12 +135,21 @@ describe("DataIngressTab", () => {
 
     expect(screen.getByLabelText("Select as image: example reel")).toBeChecked();
     expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
+    expect(screen.getByLabelText("Select as voice: example reel")).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Deselect All" }));
     await user.click(screen.getByRole("button", { name: "Select All Videos" }));
 
     expect(screen.getByLabelText("Select as image: example reel")).not.toBeChecked();
     expect(screen.getByLabelText("Select as video: example reel")).toBeChecked();
+    expect(screen.getByLabelText("Select as voice: example reel")).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Deselect All" }));
+    await user.click(screen.getByRole("button", { name: "Select All Voice" }));
+
+    expect(screen.getByLabelText("Select as image: example reel")).not.toBeChecked();
+    expect(screen.getByLabelText("Select as video: example reel")).not.toBeChecked();
+    expect(screen.getByLabelText("Select as voice: example reel")).toBeChecked();
   });
 
   it("keeps helper payload and manual path fallback behind advanced controls", async () => {

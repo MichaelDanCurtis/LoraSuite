@@ -20,7 +20,7 @@ def test_instagram_helper_rejects_token_like_payload_keys(tmp_path):
         scan_instagram_helper_payload(payload, tmp_path / "vault")
 
 
-def test_instagram_helper_creates_video_and_poster_candidates(tmp_path):
+def test_instagram_helper_creates_video_poster_and_audio_candidates(tmp_path):
     poster = tmp_path / "poster.jpg"
     Image.new("RGB", (120, 160), color=(80, 40, 120)).save(poster)
     payload = {
@@ -32,6 +32,7 @@ def test_instagram_helper_creates_video_and_poster_candidates(tmp_path):
                 "display_name": "example reel",
                 "media_type": "video",
                 "poster_path": str(poster),
+                "download_url": "https://cdninstagram.example/video.mp4",
                 "width": 1080,
                 "height": 1920,
                 "duration": 9.5,
@@ -45,9 +46,10 @@ def test_instagram_helper_creates_video_and_poster_candidates(tmp_path):
         include_video_posters_as_image_candidates=True,
     )
 
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == 3
     video = result.candidates[0]
     poster_candidate = result.candidates[1]
+    audio_candidate = result.candidates[2]
     assert video.source_kind == SourceKind.INSTAGRAM
     assert video.media_type == MediaType.VIDEO
     assert video.poster_asset_path is not None
@@ -59,6 +61,13 @@ def test_instagram_helper_creates_video_and_poster_candidates(tmp_path):
         video.poster_asset_path
     )
     assert poster_candidate.metadata_json["source_video_candidate_id"] == video.id
+    assert audio_candidate.media_type == MediaType.AUDIO
+    assert audio_candidate.duration == video.duration
+    assert audio_candidate.thumbnail_path == video.poster_asset_path
+    assert audio_candidate.selected is False
+    assert audio_candidate.metadata_json["source_video_candidate_id"] == video.id
+    assert audio_candidate.metadata_json["asset_role"] == "video_audio"
+    assert audio_candidate.metadata_json["download_url"] == "https://cdninstagram.example/video.mp4"
 
 
 def test_instagram_helper_caches_poster_data_url_without_persisting_data(tmp_path):
@@ -86,7 +95,7 @@ def test_instagram_helper_caches_poster_data_url_without_persisting_data(tmp_pat
 
     result = scan_instagram_helper_payload(payload, tmp_path / "vault")
 
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == 3
     video = result.candidates[0]
     poster_candidate = result.candidates[1]
     assert video.poster_asset_path is not None

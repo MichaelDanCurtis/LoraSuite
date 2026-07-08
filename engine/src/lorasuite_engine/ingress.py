@@ -1,5 +1,6 @@
 import json
 import ssl
+import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -289,6 +290,9 @@ class IngressService:
 
         target_dir = self.vault_root / "downloads" / candidate.source_kind.value
         target_dir.mkdir(parents=True, exist_ok=True)
+        if candidate.media_type == MediaType.AUDIO:
+            return self._download_remote_audio_candidate(candidate, download_url, target_dir)
+
         suffix = self._remote_download_suffix(
             download_url,
             media_type=candidate.media_type,
@@ -297,6 +301,45 @@ class IngressService:
         if target_path.exists():
             return target_path
 
+        self._download_remote_file(
+            candidate,
+            download_url,
+            target_path,
+            media_type=candidate.media_type,
+        )
+        return target_path
+
+    def _download_remote_audio_candidate(
+        self,
+        candidate: IngressCandidate,
+        download_url: str,
+        target_dir: Path,
+    ) -> Path:
+        audio_path = target_dir / f"{candidate.id}.m4a"
+        if audio_path.exists():
+            return audio_path
+
+        source_suffix = self._remote_video_source_suffix(download_url)
+        source_path = target_dir / f"{candidate.id}.source{source_suffix}"
+        if not source_path.exists():
+            self._download_remote_file(
+                candidate,
+                download_url,
+                source_path,
+                media_type=MediaType.VIDEO,
+            )
+        return self._extract_audio_from_video(source_path, audio_path)
+
+    def _download_remote_file(
+        self,
+        candidate: IngressCandidate,
+        download_url: str,
+        target_path: Path,
+        *,
+        media_type: MediaType | None,
+    ) -> Path:
+        suffix = target_path.suffix.lower()
+
         temporary_path = target_path.with_name(
             f".{target_path.name}.{uuid4().hex}.tmp"
         )
@@ -304,7 +347,7 @@ class IngressService:
             download_url,
             headers={
                 "User-Agent": WEB_USER_AGENT,
-                "Accept": self._remote_download_accept_header(candidate.media_type),
+                "Accept": self._remote_download_accept_header(media_type),
                 "Referer": candidate.source_locator,
             },
         )
@@ -314,7 +357,7 @@ class IngressService:
                 self._validate_remote_download_suffix(
                     suffix,
                     content_type=content_type,
-                    media_type=candidate.media_type,
+                    media_type=media_type,
                 )
                 content_length = response.headers.get("Content-Length")
                 if (
@@ -345,6 +388,40 @@ class IngressService:
 
         return target_path
 
+    def _extract_audio_from_video(self, video_path: Path, audio_path: Path) -> Path:
+        temporary_path = audio_path.with_name(f".{audio_path.stem}.{uuid4().hex}.m4a")
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(video_path),
+            "-vn",
+            "-acodec",
+            "aac",
+            "-b:a",
+            "192k",
+            str(temporary_path),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.SubprocessError as error:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            raise ValueError(f"could not extract audio with ffmpeg: {error}") from error
+        if completed.returncode != 0:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            message = (completed.stderr or completed.stdout).strip()
+            raise ValueError(f"could not extract audio with ffmpeg: {message}")
+        temporary_path.replace(audio_path)
+        return audio_path
+
     def _remote_download_suffix(
         self,
         download_url: str,
@@ -357,6 +434,12 @@ class IngressService:
         if media_type in REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE:
             return REMOTE_DOWNLOAD_SUFFIXES_BY_MEDIA_TYPE[media_type]
         return ".bin"
+
+    def _remote_video_source_suffix(self, download_url: str) -> str:
+        suffix = Path(urlparse(download_url).path).suffix.lower()
+        if suffix in REMOTE_VIDEO_SUFFIXES:
+            return suffix
+        return ".mp4"
 
     def _validate_remote_download_suffix(
         self,
