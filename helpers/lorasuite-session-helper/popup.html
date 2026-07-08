@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LoraSuite Session Helper</title>
+    <style>
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 14px;
+        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172026;
+        background: #f7f8f5;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 5px;
+        margin-bottom: 10px;
+        font-weight: 650;
+      }
+
+      input,
+      button {
+        min-height: 34px;
+        box-sizing: border-box;
+        border: 1px solid #bbc7c0;
+        font: inherit;
+      }
+
+      input {
+        width: 100%;
+        padding: 0 8px;
+        background: #ffffff;
+      }
+
+      button {
+        width: 100%;
+        background: #276a72;
+        color: #ffffff;
+      }
+
+      #status {
+        min-height: 34px;
+        margin: 10px 0 0;
+        color: #58666e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>LoraSuite Session Helper</h1>
+    <label>
+      Engine URL
+      <input id="engine-url" value="http://127.0.0.1:8765" />
+    </label>
+    <button id="scan" type="button">Scan Current Instagram Page</button>
+    <p id="status" role="status">Open an Instagram post or reel, then scan.</p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

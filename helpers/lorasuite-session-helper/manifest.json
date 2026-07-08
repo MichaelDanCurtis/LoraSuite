@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "LoraSuite Session Helper",
+  "version": "0.1.0",
+  "description": "Scans the active Instagram page and sends sanitized media manifests to the local LoraSuite engine.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LoraSuite Session Helper"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "http://127.0.0.1:8765/*"
+  ]
+}
