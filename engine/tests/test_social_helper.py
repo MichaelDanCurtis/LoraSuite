@@ -1,4 +1,6 @@
 from pathlib import Path
+from base64 import b64encode
+from io import BytesIO
 
 import pytest
 from PIL import Image
@@ -57,3 +59,41 @@ def test_instagram_helper_creates_video_and_poster_candidates(tmp_path):
         video.poster_asset_path
     )
     assert poster_candidate.metadata_json["source_video_candidate_id"] == video.id
+
+
+def test_instagram_helper_caches_poster_data_url_without_persisting_data(tmp_path):
+    poster_bytes = BytesIO()
+    Image.new("RGB", (64, 96), color=(20, 90, 140)).save(poster_bytes, "JPEG")
+    poster_data_url = (
+        "data:image/jpeg;base64," + b64encode(poster_bytes.getvalue()).decode("ascii")
+    )
+    payload = {
+        "helper_version": "session-helper-v0",
+        "media": [
+            {
+                "id": "ig_data_url_video",
+                "source_url": "https://www.instagram.com/reel/data-url/",
+                "display_name": "data url reel",
+                "media_type": "video",
+                "poster_url": "https://cdninstagram.example/poster.jpg",
+                "poster_data_url": poster_data_url,
+                "width": 64,
+                "height": 96,
+                "duration": 4.0,
+            }
+        ],
+    }
+
+    result = scan_instagram_helper_payload(payload, tmp_path / "vault")
+
+    assert len(result.candidates) == 2
+    video = result.candidates[0]
+    poster_candidate = result.candidates[1]
+    assert video.poster_asset_path is not None
+    assert Path(video.poster_asset_path).read_bytes() == poster_bytes.getvalue()
+    assert poster_candidate.metadata_json["local_import_path"] == str(
+        video.poster_asset_path
+    )
+    assert "poster_data_url" not in video.metadata_json
+    assert "poster_data_url" not in poster_candidate.metadata_json
+    assert video.metadata_json["poster_source_url"] == "https://cdninstagram.example/poster.jpg"

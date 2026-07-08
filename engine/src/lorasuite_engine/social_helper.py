@@ -1,4 +1,5 @@
 import shutil
+from base64 import b64decode
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,11 @@ from lorasuite_engine.models import (
 TOKEN_LIKE_KEYS = frozenset(
     {"authorization", "cookie", "cookies", "csrf", "session", "token", "x-csrftoken"}
 )
+DATA_URL_IMAGE_SUFFIXES = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+}
 
 
 def scan_instagram_helper_payload(
@@ -81,6 +87,7 @@ def _candidate_from_item(
             "helper_version": helper_version,
             "download_url": item.get("download_url"),
             "poster_source_path": item.get("poster_path") or item.get("thumbnail_path"),
+            "poster_source_url": item.get("poster_url") or item.get("thumbnail_url"),
         },
     )
 
@@ -111,6 +118,10 @@ def _cache_preview_asset(
     vault_root: Path,
     media_id: str,
 ) -> Path | None:
+    data_url_path = _cache_data_url_preview_asset(item, vault_root, media_id)
+    if data_url_path is not None:
+        return data_url_path
+
     raw_path = item.get("poster_path") or item.get("thumbnail_path")
     if not raw_path:
         return None
@@ -124,6 +135,33 @@ def _cache_preview_asset(
     target = previews_dir / f"{media_id}{source_path.suffix.lower()}"
     if source_path.resolve() != target.resolve():
         shutil.copy2(source_path, target)
+    return target
+
+
+def _cache_data_url_preview_asset(
+    item: Mapping[str, Any],
+    vault_root: Path,
+    media_id: str,
+) -> Path | None:
+    raw_data_url = item.get("poster_data_url") or item.get("thumbnail_data_url")
+    if not raw_data_url:
+        return None
+
+    data_url = str(raw_data_url)
+    header, separator, encoded = data_url.partition(",")
+    if not separator:
+        return None
+
+    mime_type = header.removeprefix("data:").split(";", maxsplit=1)[0].lower()
+    suffix = DATA_URL_IMAGE_SUFFIXES.get(mime_type)
+    if suffix is None or ";base64" not in header.lower():
+        return None
+
+    preview_bytes = b64decode(encoded, validate=True)
+    previews_dir = vault_root / "previews" / "social"
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    target = previews_dir / f"{media_id}{suffix}"
+    target.write_bytes(preview_bytes)
     return target
 
 
