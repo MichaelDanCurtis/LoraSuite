@@ -88,20 +88,20 @@ The **Data Ingress** tab uses scan -> review -> confirm.
 
 The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies only selected ready candidates.
 
-## Instagram Helper Fixture
+## Instagram Browser Scan
 
-The normal Instagram v0 path uses the local unpacked Session Helper extension:
+The normal Instagram v0 path uses browser cookies from a local browser session:
 
 1. Start the engine with `npm run dev:engine`.
 2. Log into Instagram in Chrome, Brave, Chromium, Edge, Firefox, or Safari.
 3. Open **Data Ingress** -> **Instagram Source** in LoraSuite.
-4. Paste an Instagram post or reel URL into **Instagram URL**.
+4. Paste an Instagram post URL, reel URL, or profile reels tab URL such as `https://www.instagram.com/example/reels/` into **Instagram URL**.
 5. Choose the matching **Browser cookies** source.
 6. Click **Scan Instagram URL**.
 7. Review the candidates in **Tile**, **List**, or **Gallery** mode.
 8. Confirm only the candidates that should enter the vault.
 
-The engine uses `yt-dlp` with the selected browser's local cookies to read Instagram metadata. It downloads only thumbnail/poster bytes during scan. It does not persist browser cookies, authorization headers, CSRF tokens, or session fields.
+For individual post and reel URLs, the engine uses `yt-dlp` with the selected browser's local cookies to read Instagram metadata. For profile reels tabs, the engine resolves the profile through Instagram's web API and then reads the reels/clips feed with the same browser session. Scans download only thumbnail/poster bytes for review. They do not persist browser cookies, authorization headers, CSRF tokens, or session fields.
 
 The unpacked Session Helper extension remains available as a fallback:
 

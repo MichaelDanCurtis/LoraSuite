@@ -1,9 +1,11 @@
+import ssl
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+import lorasuite_engine.instagram_browser as instagram_browser
 from lorasuite_engine.instagram_browser import (
     InstagramBrowserScanError,
     scan_instagram_url_with_browser_cookies,
@@ -59,6 +61,77 @@ def test_instagram_browser_scan_caches_thumbnail_candidates(tmp_path):
     assert video.metadata_json["browser_source"] == "chrome"
 
 
+def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp_path):
+    calls: list[tuple[str, str, int]] = []
+
+    def unsupported_ytdlp_metadata(_url: str, _browser: str) -> dict:
+        raise AssertionError("profile reels scans should not use yt-dlp metadata")
+
+    def fake_profile_reels(username: str, browser: str, page_size: int) -> dict:
+        calls.append((username, browser, page_size))
+        return {
+            "items": [
+                {
+                    "media": {
+                        "id": "3758183871762427742_33827583",
+                        "code": "DQnwFHVAG9e",
+                        "caption": {"text": "first reel caption"},
+                        "media_type": 2,
+                        "original_width": 720,
+                        "original_height": 1280,
+                        "video_duration": 12.75,
+                        "image_versions2": {
+                            "candidates": [
+                                {
+                                    "url": "https://cdninstagram.example/reel-small.jpg",
+                                    "width": 320,
+                                    "height": 568,
+                                },
+                                {
+                                    "url": "https://cdninstagram.example/reel-large.jpg",
+                                    "width": 720,
+                                    "height": 1280,
+                                },
+                            ]
+                        },
+                    }
+                }
+            ]
+        }
+
+    def fake_thumbnail(url: str) -> tuple[bytes, str]:
+        assert url == "https://cdninstagram.example/reel-large.jpg"
+        return jpeg_bytes(), "image/jpeg"
+
+    result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/marysuecurtis/reels/",
+        tmp_path / "vault",
+        browser="chrome",
+        metadata_extractor=unsupported_ytdlp_metadata,
+        profile_reels_fetcher=fake_profile_reels,
+        thumbnail_fetcher=fake_thumbnail,
+    )
+
+    assert calls == [("marysuecurtis", "chrome", 24)]
+    assert len(result.candidates) == 2
+    video = result.candidates[0]
+    poster = result.candidates[1]
+    assert video.source_kind == SourceKind.INSTAGRAM
+    assert video.source_locator == "https://www.instagram.com/reel/DQnwFHVAG9e/"
+    assert video.media_type == MediaType.VIDEO
+    assert video.display_name == "first reel caption"
+    assert video.width == 720
+    assert video.height == 1280
+    assert video.duration == 12.75
+    assert video.poster_asset_path is not None
+    assert Path(video.poster_asset_path).exists()
+    assert video.metadata_json["browser_source"] == "chrome"
+    assert video.metadata_json["extractor"] == "instagram-web-api"
+    assert video.metadata_json["download_url"] is None
+    assert poster.media_type == MediaType.IMAGE
+    assert poster.selected is True
+
+
 def test_instagram_browser_scan_rejects_non_instagram_urls(tmp_path):
     with pytest.raises(InstagramBrowserScanError, match="Instagram URL"):
         scan_instagram_url_with_browser_cookies(
@@ -66,3 +139,39 @@ def test_instagram_browser_scan_rejects_non_instagram_urls(tmp_path):
             tmp_path / "vault",
             metadata_extractor=lambda _url, _browser: {},
         )
+
+
+def test_thumbnail_fetch_uses_engine_ssl_context(monkeypatch):
+    seen: dict[str, object] = {}
+
+    class FakeHeaders:
+        def get_content_type(self) -> str:
+            return "image/jpeg"
+
+    class FakeResponse:
+        headers = FakeHeaders()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            return jpeg_bytes()
+
+    def fake_urlopen(_request, *, timeout: int, context: ssl.SSLContext):
+        seen["timeout"] = timeout
+        seen["context"] = context
+        return FakeResponse()
+
+    monkeypatch.setattr(instagram_browser, "urlopen", fake_urlopen)
+
+    thumbnail_bytes, content_type = instagram_browser._fetch_thumbnail(
+        "https://cdninstagram.example/poster.jpg"
+    )
+
+    assert thumbnail_bytes
+    assert content_type == "image/jpeg"
+    assert seen["timeout"] == 30
+    assert isinstance(seen["context"], ssl.SSLContext)
