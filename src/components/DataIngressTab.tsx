@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 
@@ -62,6 +63,7 @@ export function DataIngressTab({
   const [instagramPayloadText, setInstagramPayloadText] = useState(
     '{\n  "helper_version": "fixture",\n  "media": []\n}',
   );
+  const desktopRuntime = isDesktopRuntime();
 
   const activeCandidates = activeBatchCandidateIds
     ? candidates.filter((candidate) => activeBatchCandidateIds.has(candidate.id))
@@ -404,9 +406,28 @@ export function DataIngressTab({
 
       <div className="ingress-topbar" aria-label="Ingress source actions">
         <div className="ingress-actions">
-          <button className="primary-action" type="button" onClick={chooseLocalMedia}>
-            Import Media
-          </button>
+          {desktopRuntime ? (
+            <button className="primary-action" type="button" onClick={chooseLocalMedia}>
+              Import Media
+            </button>
+          ) : (
+            <>
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() => setShowAdvancedFallbacks(true)}
+              >
+                Path Scan
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Native file and folder selection is available in the Tauri desktop app."
+              >
+                Desktop Picker
+              </button>
+            </>
+          )}
           <button
             type="button"
             aria-label="Instagram Source"
@@ -427,8 +448,17 @@ export function DataIngressTab({
               readOnly
               placeholder="Default LoraSuite vault"
             />
-            <button type="button" onClick={chooseMediaDestination}>
-              Choose Destination
+            <button
+              type="button"
+              onClick={chooseMediaDestination}
+              disabled={!desktopRuntime}
+              title={
+                desktopRuntime
+                  ? undefined
+                  : "Destination folders are selected in the Tauri desktop app."
+              }
+            >
+              {desktopRuntime ? "Choose Destination" : "Desktop Only"}
             </button>
           </div>
         </label>
@@ -502,34 +532,35 @@ export function DataIngressTab({
               Advanced
             </button>
           </div>
-          {showAdvancedFallbacks && (
-            <div className="advanced-fallbacks">
-              <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
-              <textarea
-                id="instagram-helper-payload"
-                value={instagramPayloadText}
-                onChange={(event) => setInstagramPayloadText(event.target.value)}
-                rows={8}
-              />
-              <button type="button" onClick={scanInstagramHelperPayload}>
-                Scan Instagram Helper Payload
-              </button>
-              <button type="button" onClick={loadInstagramHelperCandidates}>
-                Load Helper Candidates
-              </button>
-              <label htmlFor="manual-paths">Manual path fallback</label>
-              <textarea
-                id="manual-paths"
-                value={manualPaths}
-                onChange={(event) => setManualPaths(event.target.value)}
-                rows={3}
-                placeholder="/absolute/path/to/file-or-folder"
-              />
-              <button type="button" onClick={scanManualPaths}>
-                Scan Manual Paths
-              </button>
-            </div>
-          )}
+        </div>
+      )}
+
+      {showAdvancedFallbacks && (
+        <div className="form-stack helper-payload-panel instagram-panel">
+          <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
+          <textarea
+            id="instagram-helper-payload"
+            value={instagramPayloadText}
+            onChange={(event) => setInstagramPayloadText(event.target.value)}
+            rows={8}
+          />
+          <button type="button" onClick={scanInstagramHelperPayload}>
+            Scan Instagram Helper Payload
+          </button>
+          <button type="button" onClick={loadInstagramHelperCandidates}>
+            Load Helper Candidates
+          </button>
+          <label htmlFor="manual-paths">Manual path fallback</label>
+          <textarea
+            id="manual-paths"
+            value={manualPaths}
+            onChange={(event) => setManualPaths(event.target.value)}
+            rows={3}
+            placeholder="/absolute/path/to/file-or-folder"
+          />
+          <button type="button" onClick={scanManualPaths}>
+            Scan Manual Paths
+          </button>
         </div>
       )}
 
@@ -1179,4 +1210,12 @@ function dialogErrorMessage(error: unknown): string {
     return `Native file picker unavailable: ${error.message}. Use Advanced Fallbacks to scan paths manually.`;
   }
   return "Native file picker unavailable. Use Advanced Fallbacks to scan paths manually.";
+}
+
+function isDesktopRuntime(): boolean {
+  try {
+    return isTauri();
+  } catch {
+    return false;
+  }
 }

@@ -1,10 +1,22 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
+const { isTauriMock } = vi.hoisted(() => ({
+  isTauriMock: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: isTauriMock,
+}));
+
 describe("App", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(true);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

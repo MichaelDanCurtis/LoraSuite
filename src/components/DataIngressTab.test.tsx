@@ -9,9 +9,15 @@ import type { IngressCandidate, IngressJob } from "../lib/types";
 const { openMock } = vi.hoisted(() => ({
   openMock: vi.fn(),
 }));
+const { isTauriMock } = vi.hoisted(() => ({
+  isTauriMock: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: openMock,
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: isTauriMock,
 }));
 
 describe("DataIngressTab", () => {
@@ -84,6 +90,7 @@ describe("DataIngressTab", () => {
 
   beforeEach(() => {
     openMock.mockReset();
+    isTauriMock.mockReturnValue(true);
   });
 
   async function scanInstagramUrl(user: ReturnType<typeof userEvent.setup>) {
@@ -194,7 +201,7 @@ describe("DataIngressTab", () => {
     expect(screen.getByLabelText("Select as voice: example reel")).toBeChecked();
   });
 
-  it("uses one local media picker for files and folders", async () => {
+  it("uses one Tauri local media picker for files and folders", async () => {
     const user = userEvent.setup();
     openMock.mockResolvedValue(["/tmp/portrait.png", "/tmp/session-folder"]);
     const scanLocalIngress = vi.fn().mockResolvedValue({
@@ -224,6 +231,31 @@ describe("DataIngressTab", () => {
       title: "Choose files or folders",
     });
     expect(scanLocalIngress).toHaveBeenCalledWith(["/tmp/portrait.png", "/tmp/session-folder"], true);
+  });
+
+  it("uses browser-safe local controls outside Tauri", async () => {
+    const user = userEvent.setup();
+    isTauriMock.mockReturnValue(false);
+    const engine = engineWith();
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Import Media" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose Destination" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Path Scan" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Desktop Picker" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Desktop Only" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Path Scan" }));
+
+    expect(screen.getByLabelText("Manual path fallback")).toBeInTheDocument();
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   it("selects the media destination with a folder picker", async () => {
