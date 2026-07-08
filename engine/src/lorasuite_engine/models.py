@@ -125,11 +125,13 @@ class IngressJob(BaseModel):
     candidate_count: int = 0
     selected_count: int = 0
     imported_count: int = 0
+    deferred_count: int = 0
     skipped_count: int = 0
     failed_count: int = 0
     status: IngressJobStatus = IngressJobStatus.QUEUED
     progress_message: str = "Queued"
     errors: list[dict[str, str]] = Field(default_factory=list)
+    deferred_candidates: list[dict[str, Any]] = Field(default_factory=list)
     imported_media_items: list[MediaItem] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None

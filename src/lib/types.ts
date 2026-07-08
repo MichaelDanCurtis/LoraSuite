@@ -64,11 +64,13 @@ export interface IngressJob {
   candidate_count: number;
   selected_count: number;
   imported_count: number;
+  deferred_count: number;
   skipped_count: number;
   failed_count: number;
   status: IngressJobStatus;
   progress_message: string;
   errors: Array<Record<string, string>>;
+  deferred_candidates: Array<Record<string, unknown>>;
   imported_media_items: MediaItem[];
   created_at: string;
   started_at?: string | null;

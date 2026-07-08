@@ -127,6 +127,8 @@ Example:
 
 The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The helper path creates a video preview candidate and a selectable poster image candidate. Full Instagram original downloading remains deferred to a future confirm-time downloader.
 
+If a helper video candidate is selected before the original transfer path exists, the ingress job completes with that item counted as **Deferred** instead of failed. Poster-image candidates with cached local previews still import immediately.
+
 ## Legacy Direct Import API
 
 The engine still exposes `/vault/import/local` for direct tests and compatibility, but the product UI should use the ingress scan/job flow.

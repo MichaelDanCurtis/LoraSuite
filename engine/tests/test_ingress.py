@@ -138,3 +138,41 @@ def test_ingress_job_imports_cached_social_poster_candidate(tmp_path):
     assert completed.status == IngressJobStatus.COMPLETE
     assert completed.imported_count == 1
     assert completed.imported_media_items[0].metadata_json["original_path"] == str(poster)
+
+
+def test_ingress_job_defers_social_video_original_download(tmp_path):
+    service = IngressService(tmp_path / "vault")
+    candidate = IngressCandidate(
+        source_kind=SourceKind.INSTAGRAM,
+        source_locator="https://www.instagram.com/reel/example/",
+        display_name="example reel",
+        media_type=MediaType.VIDEO,
+        duration=9.5,
+        selected=True,
+        metadata_json={
+            "download_url": "https://cdninstagram.example/video.mp4",
+            "helper_version": "lorasuite-session-helper-v0",
+            "platform_media_id": "ig_video_1",
+        },
+    )
+    service.store_candidates([candidate])
+
+    job = service.create_job(SourceKind.INSTAGRAM, [candidate.id])
+    completed = service.process_job(job.id)
+
+    assert completed.status == IngressJobStatus.COMPLETE
+    assert completed.imported_count == 0
+    assert completed.failed_count == 0
+    assert completed.deferred_count == 1
+    assert completed.deferred_candidates == [
+        {
+            "candidate_id": candidate.id,
+            "display_name": "example reel",
+            "media_type": "video",
+            "source_kind": "instagram",
+            "source_locator": "https://www.instagram.com/reel/example/",
+            "download_url": "https://cdninstagram.example/video.mp4",
+            "source_url": None,
+            "reason": "original download requires session helper transfer",
+        }
+    ]

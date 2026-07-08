@@ -96,11 +96,22 @@ class IngressService:
             for import_path in [self._import_path_for_candidate(candidate)]
             if import_path is not None
         ]
+        deferred_downloads = [
+            deferred_download
+            for candidate in selected_candidates
+            if candidate.status == IngressCandidateStatus.READY
+            and self._import_path_for_candidate(candidate) is None
+            for deferred_download in [self._deferred_download_for_candidate(candidate)]
+            if deferred_download is not None
+        ]
         rejected_candidates = [
             candidate
             for candidate in selected_candidates
             if candidate.status != IngressCandidateStatus.READY
-            or self._import_path_for_candidate(candidate) is None
+            or (
+                self._import_path_for_candidate(candidate) is None
+                and self._deferred_download_for_candidate(candidate) is None
+            )
         ]
 
         import_result = VaultService(self.vault_root).import_local_paths(ready_import_paths)
@@ -110,12 +121,17 @@ class IngressService:
 
         job.imported_media_items = import_result.media_items
         job.imported_count = len(import_result.media_items)
+        job.deferred_candidates = deferred_downloads
+        job.deferred_count = len(deferred_downloads)
         job.failed_count = (
             len(import_result.errors) + len(rejected_candidates) + len(missing_ids)
         )
         job.skipped_count = max(
             0,
-            len(job.candidate_ids) - job.imported_count - job.failed_count,
+            len(job.candidate_ids)
+            - job.imported_count
+            - job.deferred_count
+            - job.failed_count,
         )
         job.errors = [
             error.model_dump(mode="json") for error in import_result.errors
@@ -139,11 +155,14 @@ class IngressService:
             if job.failed_count == 0
             else IngressJobStatus.FAILED
         )
-        job.progress_message = (
-            "Ingress complete"
-            if job.status == IngressJobStatus.COMPLETE
-            else "Ingress completed with errors"
-        )
+        if job.status == IngressJobStatus.COMPLETE:
+            job.progress_message = (
+                "Ingress complete; original downloads deferred"
+                if job.deferred_count
+                else "Ingress complete"
+            )
+        else:
+            job.progress_message = "Ingress completed with errors"
         job.completed_at = utc_now()
         jobs[job.id] = job
         self._write_jobs(jobs)
@@ -179,6 +198,29 @@ class IngressService:
         if isinstance(local_import_path, str) and local_import_path:
             return Path(local_import_path)
         return None
+
+    def _deferred_download_for_candidate(
+        self, candidate: IngressCandidate
+    ) -> dict[str, Any] | None:
+        if candidate.source_kind == SourceKind.LOCAL:
+            return None
+
+        download_url = candidate.metadata_json.get("download_url")
+        source_url = candidate.metadata_json.get("source_url")
+        source_locator = candidate.source_locator
+        if not download_url and not source_url and not source_locator:
+            return None
+
+        return {
+            "candidate_id": candidate.id,
+            "display_name": candidate.display_name,
+            "media_type": candidate.media_type.value if candidate.media_type else None,
+            "source_kind": candidate.source_kind.value,
+            "source_locator": source_locator,
+            "download_url": download_url if isinstance(download_url, str) else None,
+            "source_url": source_url if isinstance(source_url, str) and source_url else None,
+            "reason": "original download requires session helper transfer",
+        }
 
     def _expand_root(self, root: Path, *, recursive: bool) -> list[Path]:
         if root.is_file():

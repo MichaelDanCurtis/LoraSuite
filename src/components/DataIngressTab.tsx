@@ -169,8 +169,9 @@ export function DataIngressTab({
       if (completedJob.imported_media_items.length > 0) {
         onMediaItemsImported(completedJob.imported_media_items);
       }
+      const deferredCount = completedJob.deferred_count ?? 0;
       setStatus(
-        `${completedJob.progress_message}: ${completedJob.imported_count} imported, ${completedJob.failed_count} failed.`,
+        `${completedJob.progress_message}: ${completedJob.imported_count} imported, ${deferredCount} deferred, ${completedJob.failed_count} failed.`,
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Ingress job failed.");
@@ -413,6 +414,7 @@ export function DataIngressTab({
                 <th>Source</th>
                 <th>Selected</th>
                 <th>Imported</th>
+                <th>Deferred</th>
                 <th>Failed</th>
                 <th>Message</th>
               </tr>
@@ -424,6 +426,7 @@ export function DataIngressTab({
                   <td>{job.source_kind}</td>
                   <td>{job.selected_count}</td>
                   <td>{job.imported_count}</td>
+                  <td>{job.deferred_count ?? 0}</td>
                   <td>{job.failed_count}</td>
                   <td>{job.progress_message}</td>
                 </tr>
