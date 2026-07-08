@@ -90,7 +90,20 @@ The first scan does not copy raw media into the vault. It creates reviewable can
 
 ## Instagram Helper Fixture
 
-The first Instagram ingress path accepts a browser-extension Session Helper payload. In development, paste fixture JSON into **Instagram Source** -> **Instagram helper payload**.
+The normal Instagram v0 path uses the local unpacked Session Helper extension:
+
+1. Start the engine with `npm run dev:engine`.
+2. Load `helpers/lorasuite-session-helper` as an unpacked Chrome/Chromium extension.
+3. Open an Instagram post or reel in that browser.
+4. Click the extension and choose **Scan Current Instagram Page**.
+5. Open **Data Ingress** -> **Instagram Source** in LoraSuite.
+6. Click **Load Helper Candidates**.
+7. Review the candidates in **Tile**, **List**, or **Gallery** mode.
+8. Confirm only the candidates that should enter the vault.
+
+The helper reads page metadata and poster image URLs from the active tab. It sends a sanitized manifest to `http://127.0.0.1:8765/ingress/instagram/helper-scan`, and uses `credentials: "omit"` when fetching poster image bytes for the low-bandwidth preview. It does not send cookies, authorization headers, CSRF tokens, or browser session fields.
+
+The debug fallback still accepts a browser-extension Session Helper payload. In development, paste fixture JSON into **Instagram Source** -> **Instagram helper payload**.
 
 Example:
 
@@ -112,7 +125,7 @@ Example:
 }
 ```
 
-The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The fixture path creates a video preview candidate and a selectable poster image candidate. Full Instagram original downloading remains behind the future browser-extension helper.
+The engine rejects token-like fields such as `cookie`, `authorization`, `csrf`, `session`, and `token`. The helper path creates a video preview candidate and a selectable poster image candidate. Full Instagram original downloading remains deferred to a future confirm-time downloader.
 
 ## Legacy Direct Import API
 
