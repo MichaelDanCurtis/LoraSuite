@@ -42,6 +42,7 @@ describe("DataIngressTab", () => {
     const engine: EngineClient = {
       importLocal: vi.fn(),
       scanLocalIngress: vi.fn(),
+      scanInstagramBrowserUrl: vi.fn(),
       scanInstagramHelperPayload: vi.fn().mockResolvedValue({
         id: "scan_1",
         candidates: [candidate],

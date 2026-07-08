@@ -6,6 +6,10 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from lorasuite_engine.exports import create_runcomfy_image_export
+from lorasuite_engine.instagram_browser import (
+    InstagramBrowserScanError,
+    scan_instagram_url_with_browser_cookies,
+)
 from lorasuite_engine.ingress import IngressService
 from lorasuite_engine.models import SourceKind
 from lorasuite_engine.social_helper import scan_instagram_helper_payload
@@ -31,6 +35,11 @@ class LocalIngressScanRequest(BaseModel):
 class InstagramHelperScanRequest(BaseModel):
     payload: dict[str, Any]
     include_video_posters_as_image_candidates: bool = True
+
+
+class InstagramBrowserScanRequest(BaseModel):
+    url: str
+    browser: str = "chrome"
 
 
 class IngressJobRequest(BaseModel):
@@ -95,6 +104,19 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
                 ),
             )
         except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        ingress_service().store_candidates(result.candidates)
+        return result.model_dump(mode="json")
+
+    @app.post("/ingress/instagram/browser-scan")
+    def scan_instagram_browser(request: InstagramBrowserScanRequest) -> dict[str, object]:
+        try:
+            result = scan_instagram_url_with_browser_cookies(
+                request.url,
+                app.state.vault_root,
+                browser=request.browser,
+            )
+        except InstagramBrowserScanError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         ingress_service().store_candidates(result.candidates)
         return result.model_dump(mode="json")

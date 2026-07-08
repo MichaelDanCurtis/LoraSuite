@@ -93,13 +93,23 @@ The first scan does not copy raw media into the vault. It creates reviewable can
 The normal Instagram v0 path uses the local unpacked Session Helper extension:
 
 1. Start the engine with `npm run dev:engine`.
-2. Load `helpers/lorasuite-session-helper` as an unpacked Chrome/Chromium extension.
-3. Open an Instagram post or reel in that browser.
-4. Click the extension and choose **Scan Current Instagram Page**.
-5. Open **Data Ingress** -> **Instagram Source** in LoraSuite.
-6. Click **Load Helper Candidates**.
+2. Log into Instagram in Chrome, Brave, Chromium, Edge, Firefox, or Safari.
+3. Open **Data Ingress** -> **Instagram Source** in LoraSuite.
+4. Paste an Instagram post or reel URL into **Instagram URL**.
+5. Choose the matching **Browser cookies** source.
+6. Click **Scan Instagram URL**.
 7. Review the candidates in **Tile**, **List**, or **Gallery** mode.
 8. Confirm only the candidates that should enter the vault.
+
+The engine uses `yt-dlp` with the selected browser's local cookies to read Instagram metadata. It downloads only thumbnail/poster bytes during scan. It does not persist browser cookies, authorization headers, CSRF tokens, or session fields.
+
+The unpacked Session Helper extension remains available as a fallback:
+
+1. Load `helpers/lorasuite-session-helper` as an unpacked Chrome/Chromium extension.
+2. Open an Instagram post or reel in that browser.
+3. Click the extension and choose **Scan Current Instagram Page**.
+4. Open **Data Ingress** -> **Instagram Source** in LoraSuite.
+5. Click **Load Helper Candidates**.
 
 The helper reads page metadata and poster image URLs from the active tab. It sends a sanitized manifest to `http://127.0.0.1:8765/ingress/instagram/helper-scan`, and uses `credentials: "omit"` when fetching poster image bytes for the low-bandwidth preview. It does not send cookies, authorization headers, CSRF tokens, or browser session fields.
 

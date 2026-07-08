@@ -71,6 +71,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Instagram Source" }));
 
     expect(screen.getByLabelText("Instagram helper payload")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instagram URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Browser cookies")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan Instagram URL" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Scan Instagram Helper Payload" }),
     ).toBeInTheDocument();

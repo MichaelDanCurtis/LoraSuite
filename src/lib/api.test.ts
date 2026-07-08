@@ -81,6 +81,26 @@ describe("createEngineClient", () => {
     });
   });
 
+  it("posts instagram browser scans to the engine", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "scan_browser", candidates: [], errors: [] }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+
+    await client.scanInstagramBrowserUrl("https://www.instagram.com/reel/example/", "chrome");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://engine.test/ingress/instagram/browser-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: "https://www.instagram.com/reel/example/",
+        browser: "chrome",
+      }),
+    });
+  });
+
   it("lists stored ingress candidates by source", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

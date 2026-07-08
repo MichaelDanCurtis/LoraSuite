@@ -88,6 +88,8 @@ def _candidate_from_item(
             "download_url": item.get("download_url"),
             "poster_source_path": item.get("poster_path") or item.get("thumbnail_path"),
             "poster_source_url": item.get("poster_url") or item.get("thumbnail_url"),
+            "browser_source": item.get("browser_source"),
+            "extractor": item.get("extractor"),
         },
     )
 

@@ -8,6 +8,7 @@ dependencies = [
   "pillow>=10.0",
   "pydantic>=2.8",
   "uvicorn[standard]>=0.30",
+  "yt-dlp>=2025.1.0",
 ]
 
 [project.optional-dependencies]

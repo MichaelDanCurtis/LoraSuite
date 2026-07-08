@@ -3,7 +3,9 @@ from pathlib import Path
 
 from PIL import Image
 
+import lorasuite_engine.api as api_module
 from lorasuite_engine.api import create_app
+from lorasuite_engine.models import IngressCandidate, IngressScanResult, MediaType
 
 
 def file_sha256(path: Path) -> str:
@@ -254,6 +256,38 @@ def test_ingress_candidates_endpoint_filters_instagram_candidates(client, tmp_pa
         "instagram"
     }
     assert body["errors"] == []
+
+
+def test_instagram_browser_scan_endpoint_stores_thumbnail_candidates(
+    client, monkeypatch
+):
+    def fake_scan(url, vault_root, *, browser):
+        assert url == "https://www.instagram.com/reel/browser/"
+        assert browser == "chrome"
+        return IngressScanResult(
+            candidates=[
+                IngressCandidate(
+                    source_kind=api_module.SourceKind.INSTAGRAM,
+                    source_locator=url,
+                    display_name="browser reel",
+                    media_type=MediaType.VIDEO,
+                    selected=False,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(api_module, "scan_instagram_url_with_browser_cookies", fake_scan)
+
+    response = client.post(
+        "/ingress/instagram/browser-scan",
+        json={"url": "https://www.instagram.com/reel/browser/", "browser": "chrome"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["candidates"]) == 1
+    listed = client.get("/ingress/candidates", params={"source_kind": "instagram"}).json()
+    assert listed["candidates"][0]["display_name"] == "browser reel"
 
 
 def test_ingress_job_endpoint_processes_selected_candidates(client, tmp_path):

@@ -160,6 +160,8 @@ fieldset legend {
   font-weight: 650;
 }
 
+.form-stack input,
+.form-stack select,
 .form-stack textarea,
 .field-grid input {
   display: block;
@@ -170,6 +172,10 @@ fieldset legend {
   border: 1px solid #bbc7c0;
   background: #ffffff;
   color: #172026;
+}
+
+.form-stack select {
+  min-height: 36px;
 }
 
 .primary-action {

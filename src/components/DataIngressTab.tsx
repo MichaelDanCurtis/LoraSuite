@@ -15,6 +15,7 @@ interface DataIngressTabProps {
 }
 
 const viewModes: ViewMode[] = ["tile", "list", "gallery"];
+const browserCookieSources = ["chrome", "brave", "chromium", "edge", "firefox", "safari"] as const;
 
 export function DataIngressTab({
   engine,
@@ -30,6 +31,8 @@ export function DataIngressTab({
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [jobs, setJobs] = useState<IngressJob[]>([]);
   const [showInstagramHelper, setShowInstagramHelper] = useState(false);
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [instagramBrowser, setInstagramBrowser] = useState("chrome");
   const [instagramPayloadText, setInstagramPayloadText] = useState(
     '{\n  "helper_version": "fixture",\n  "media": []\n}',
   );
@@ -109,6 +112,23 @@ export function DataIngressTab({
       setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Instagram helper scan failed.");
+    }
+  }
+
+  async function scanInstagramBrowserUrl() {
+    const url = instagramUrl.trim();
+    if (!url) {
+      setStatus("Enter an Instagram URL.");
+      return;
+    }
+
+    try {
+      setStatus("Scanning Instagram URL with browser cookies.");
+      const result = await engine.scanInstagramBrowserUrl(url, instagramBrowser);
+      applyScanResult(result.candidates);
+      setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Instagram URL scan failed.");
     }
   }
 
@@ -267,6 +287,28 @@ export function DataIngressTab({
 
       {showInstagramHelper && (
         <div className="form-stack helper-payload-panel">
+          <label htmlFor="instagram-url">Instagram URL</label>
+          <input
+            id="instagram-url"
+            value={instagramUrl}
+            onChange={(event) => setInstagramUrl(event.target.value)}
+            placeholder="https://www.instagram.com/reel/..."
+          />
+          <label htmlFor="instagram-browser">Browser cookies</label>
+          <select
+            id="instagram-browser"
+            value={instagramBrowser}
+            onChange={(event) => setInstagramBrowser(event.target.value)}
+          >
+            {browserCookieSources.map((browser) => (
+              <option key={browser} value={browser}>
+                {browserLabel(browser)}
+              </option>
+            ))}
+          </select>
+          <button type="button" onClick={scanInstagramBrowserUrl}>
+            Scan Instagram URL
+          </button>
           <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
           <textarea
             id="instagram-helper-payload"
@@ -592,6 +634,10 @@ function StatusBadge({ candidate }: { candidate: IngressCandidate }) {
 
 function modeLabel(mode: ViewMode): string {
   return mode[0].toUpperCase() + mode.slice(1);
+}
+
+function browserLabel(browser: string): string {
+  return browser[0].toUpperCase() + browser.slice(1);
 }
 
 function mediaSummary(candidate: IngressCandidate): string {
