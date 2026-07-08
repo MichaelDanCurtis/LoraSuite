@@ -182,7 +182,113 @@ describe("DataIngressTab", () => {
       "https://www.instagram.com/marysuecurtis/reels/",
       "chrome",
       8,
+      undefined,
     );
+  });
+
+  it("loads the next Instagram batch while preserving earlier review choices", async () => {
+    const user = userEvent.setup();
+    const firstBatchCandidate: IngressCandidate = {
+      id: "candidate_first_image",
+      source_kind: "instagram",
+      source_locator: "https://www.instagram.com/p/FIRST/",
+      display_name: "first batch image",
+      media_type: "image",
+      thumbnail_path: "/tmp/vault/previews/social/first.jpg",
+      status: "ready",
+      selected: true,
+    };
+    const secondBatchCandidate: IngressCandidate = {
+      id: "candidate_second_image",
+      source_kind: "instagram",
+      source_locator: "https://www.instagram.com/p/SECOND/",
+      display_name: "second batch image",
+      media_type: "image",
+      thumbnail_path: "/tmp/vault/previews/social/second.jpg",
+      status: "ready",
+      selected: true,
+    };
+    const completedJob = {
+      id: "job_1",
+      source_kind: "instagram",
+      candidate_ids: [secondBatchCandidate.id],
+      candidate_count: 1,
+      selected_count: 1,
+      imported_count: 1,
+      deferred_count: 0,
+      skipped_count: 0,
+      failed_count: 0,
+      status: "complete",
+      progress_message: "Ingress complete",
+      errors: [],
+      deferred_candidates: [],
+      imported_media_items: [],
+      created_at: "2026-07-08T00:00:00Z",
+    } as IngressJob;
+    const scanInstagramBrowserUrl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "scan_1",
+        candidates: [firstBatchCandidate],
+        errors: [],
+        metadata_json: {
+          has_next_batch: true,
+          next_cursor: "cursor_2",
+        },
+      })
+      .mockResolvedValueOnce({
+        id: "scan_2",
+        candidates: [secondBatchCandidate],
+        errors: [],
+        metadata_json: {
+          has_next_batch: false,
+        },
+      });
+    const createIngressJob = vi.fn().mockResolvedValue({
+      ...completedJob,
+      status: "queued",
+      progress_message: "Queued",
+    });
+    const engine = engineWith({
+      scanInstagramBrowserUrl,
+      createIngressJob,
+      getIngressJob: vi.fn().mockResolvedValue(completedJob),
+    });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.type(
+      screen.getByLabelText("Instagram URL"),
+      "https://www.instagram.com/marysuecurtis/reels/",
+    );
+    await user.clear(screen.getByLabelText("Scan limit"));
+    await user.type(screen.getByLabelText("Scan limit"), "2");
+    await user.click(screen.getByRole("button", { name: "Scan Instagram URL" }));
+    await user.click(await screen.findByLabelText("Select as image: first batch image"));
+    await user.click(screen.getByRole("button", { name: "Next Batch" }));
+
+    expect(await screen.findByText("second batch image")).toBeInTheDocument();
+    expect(screen.queryByText("first batch image")).not.toBeInTheDocument();
+    expect(scanInstagramBrowserUrl).toHaveBeenLastCalledWith(
+      "https://www.instagram.com/marysuecurtis/reels/",
+      "chrome",
+      2,
+      "cursor_2",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Confirm Ingest" }));
+
+    expect(createIngressJob).toHaveBeenCalledWith({
+      source_kind: "instagram",
+      candidate_ids: [secondBatchCandidate.id],
+    });
   });
 
   it("opens a source preview for video candidates", async () => {

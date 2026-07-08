@@ -116,6 +116,7 @@ class IngressScanResult(BaseModel):
     id: str = Field(default_factory=lambda: new_id("scan"))
     candidates: list[IngressCandidate] = Field(default_factory=list)
     errors: list[dict[str, str]] = Field(default_factory=list)
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
 
 
 class IngressJob(BaseModel):

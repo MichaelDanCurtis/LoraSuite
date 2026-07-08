@@ -49,6 +49,7 @@ export interface IngressScanResult {
   id: string;
   candidates: IngressCandidate[];
   errors: Array<Record<string, string>>;
+  metadata_json?: Record<string, unknown>;
 }
 
 export interface CreateIngressJobRequest {

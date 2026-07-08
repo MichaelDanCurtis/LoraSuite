@@ -314,6 +314,89 @@ def test_instagram_profile_feed_payload_adds_photo_candidates():
     assert photo["poster_data_url"].startswith("data:image/jpeg;base64,")
 
 
+def test_instagram_profile_scan_returns_opaque_next_batch_cursor(tmp_path):
+    calls: list[tuple[str, str, int, str | None]] = []
+
+    def unsupported_ytdlp_metadata(_url: str, _browser: str) -> dict:
+        raise AssertionError("profile scans should not use yt-dlp metadata")
+
+    def fake_profile_page(
+        username: str,
+        browser: str,
+        page_size: int,
+        cursor: str | None,
+    ) -> dict:
+        calls.append((username, browser, page_size, cursor))
+        if cursor == "feed_cursor_2":
+            return {
+                "items": [
+                    {
+                        "id": "feed_photo_2",
+                        "code": "FEED2",
+                        "media_type": 8,
+                        "caption": {"text": "second page photo"},
+                        "image_versions2": {
+                            "candidates": [
+                                {"url": "https://cdninstagram.example/feed-2.jpg"}
+                            ]
+                        },
+                    }
+                ],
+                "more_available": False,
+            }
+        return {
+            "items": [
+                {
+                    "id": "feed_photo_1",
+                    "code": "FEED1",
+                    "media_type": 8,
+                    "caption": {"text": "first page photo"},
+                    "image_versions2": {
+                        "candidates": [
+                            {"url": "https://cdninstagram.example/feed-1.jpg"}
+                        ]
+                    },
+                }
+            ],
+            "more_available": True,
+            "next_max_id": "feed_cursor_2",
+        }
+
+    def fake_thumbnail(_url: str) -> tuple[bytes, str]:
+        return jpeg_bytes(), "image/jpeg"
+
+    first_result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/marysuecurtis/reels/",
+        tmp_path / "vault",
+        browser="chrome",
+        limit=1,
+        metadata_extractor=unsupported_ytdlp_metadata,
+        profile_page_fetcher=fake_profile_page,
+        thumbnail_fetcher=fake_thumbnail,
+    )
+    second_result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/marysuecurtis/reels/",
+        tmp_path / "vault",
+        browser="chrome",
+        limit=1,
+        cursor=first_result.metadata_json["next_cursor"],
+        metadata_extractor=unsupported_ytdlp_metadata,
+        profile_page_fetcher=fake_profile_page,
+        thumbnail_fetcher=fake_thumbnail,
+    )
+
+    assert calls == [
+        ("marysuecurtis", "chrome", 1, None),
+        ("marysuecurtis", "chrome", 1, "feed_cursor_2"),
+    ]
+    assert first_result.metadata_json["has_next_batch"] is True
+    assert first_result.metadata_json["next_cursor"]
+    assert first_result.candidates[0].display_name == "first page photo"
+    assert second_result.metadata_json["has_next_batch"] is False
+    assert "next_cursor" not in second_result.metadata_json
+    assert second_result.candidates[0].display_name == "second page photo"
+
+
 def test_instagram_profile_payload_dedupes_profile_and_reel_source_urls():
     def fake_thumbnail(_url: str) -> tuple[bytes, str]:
         return jpeg_bytes(), "image/jpeg"

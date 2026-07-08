@@ -28,6 +28,7 @@ export interface EngineClient {
     url: string,
     browser?: string,
     limit?: number,
+    cursor?: string,
   ): Promise<IngressScanResult>;
   listIngressCandidates(sourceKind?: SourceKind): Promise<IngressScanResult>;
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
@@ -89,11 +90,12 @@ export function createEngineClient(
         include_video_posters_as_image_candidates: includeVideoPostersAsImageCandidates,
       });
     },
-    scanInstagramBrowserUrl(url: string, browser = "chrome", limit = 24) {
+    scanInstagramBrowserUrl(url: string, browser = "chrome", limit = 24, cursor?: string) {
       return postJson<IngressScanResult>("/ingress/instagram/browser-scan", {
         url,
         browser,
         limit,
+        cursor,
       });
     },
     listIngressCandidates(sourceKind?: SourceKind) {

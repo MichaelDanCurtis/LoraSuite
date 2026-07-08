@@ -2,7 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 
 import type { EngineClient } from "../lib/api";
-import type { IngressCandidate, IngressJob, MediaItem } from "../lib/types";
+import type { IngressCandidate, IngressJob, IngressScanResult, MediaItem } from "../lib/types";
 
 type ViewMode = "tile" | "list" | "gallery";
 type MediaFilter = "all" | "image" | "video" | "audio";
@@ -36,6 +36,7 @@ export function DataIngressTab({
   const [manualPaths, setManualPaths] = useState("");
   const [status, setStatus] = useState("Idle");
   const [candidates, setCandidates] = useState<IngressCandidate[]>([]);
+  const [activeBatchCandidateIds, setActiveBatchCandidateIds] = useState<Set<string> | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("tile");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
@@ -46,12 +47,17 @@ export function DataIngressTab({
   const [instagramUrl, setInstagramUrl] = useState("");
   const [instagramBrowser, setInstagramBrowser] = useState("chrome");
   const [instagramScanLimit, setInstagramScanLimit] = useState("24");
+  const [instagramNextCursor, setInstagramNextCursor] = useState<string | undefined>();
+  const [instagramBatchNumber, setInstagramBatchNumber] = useState(0);
   const [videoPreviewItem, setVideoPreviewItem] = useState<CandidateReviewItem | null>(null);
   const [instagramPayloadText, setInstagramPayloadText] = useState(
     '{\n  "helper_version": "fixture",\n  "media": []\n}',
   );
 
-  const reviewItems = buildReviewItems(candidates);
+  const activeCandidates = activeBatchCandidateIds
+    ? candidates.filter((candidate) => activeBatchCandidateIds.has(candidate.id))
+    : candidates;
+  const reviewItems = buildReviewItems(activeCandidates);
   const visibleReviewItems = reviewItems.filter((item) => itemMatchesFilter(item, mediaFilter));
   const selectedReadyCount = candidates.filter(
     (candidate) => candidate.status === "ready" && selectedIds.has(candidate.id),
@@ -118,6 +124,7 @@ export function DataIngressTab({
     try {
       const result = await engine.scanLocalIngress(paths, true);
       applyScanResult(result.candidates);
+      clearInstagramBatchState();
       setStatus(
         `Scanned ${result.candidates.length} candidate(s). ${result.errors.length} root error(s).`,
       );
@@ -132,6 +139,7 @@ export function DataIngressTab({
       setStatus("Scanning Instagram helper payload.");
       const result = await engine.scanInstagramHelperPayload(payload, true);
       applyScanResult(result.candidates);
+      clearInstagramBatchState();
       setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Instagram helper scan failed.");
@@ -152,11 +160,41 @@ export function DataIngressTab({
 
     try {
       setStatus("Scanning Instagram URL with browser cookies.");
-      const result = await engine.scanInstagramBrowserUrl(url, instagramBrowser, scanLimit);
-      applyScanResult(result.candidates);
-      setStatus(`Scanned ${result.candidates.length} Instagram candidate(s).`);
+      const result = await engine.scanInstagramBrowserUrl(
+        url,
+        instagramBrowser,
+        scanLimit,
+        undefined,
+      );
+      applyScanResult(result.candidates, { append: false });
+      applyInstagramBatchMetadata(result, { append: false });
+      setStatus(instagramScanStatus(result, 1));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Instagram URL scan failed.");
+    }
+  }
+
+  async function loadNextInstagramBatch() {
+    const url = instagramUrl.trim();
+    const scanLimit = parseScanLimit(instagramScanLimit);
+    if (!url || scanLimit === null || !instagramNextCursor) {
+      setStatus("No next Instagram batch is available.");
+      return;
+    }
+
+    try {
+      setStatus("Loading next Instagram batch.");
+      const result = await engine.scanInstagramBrowserUrl(
+        url,
+        instagramBrowser,
+        scanLimit,
+        instagramNextCursor,
+      );
+      applyScanResult(result.candidates, { append: true });
+      applyInstagramBatchMetadata(result, { append: true });
+      setStatus(instagramScanStatus(result, instagramBatchNumber + 1));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Instagram batch load failed.");
     }
   }
 
@@ -165,22 +203,44 @@ export function DataIngressTab({
       setStatus("Loading Instagram helper candidates.");
       const result = await engine.listIngressCandidates("instagram");
       applyScanResult(result.candidates);
+      clearInstagramBatchState();
       setStatus(`Loaded ${result.candidates.length} Instagram helper candidate(s).`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Candidate load failed.");
     }
   }
 
-  function applyScanResult(nextCandidates: IngressCandidate[]) {
-    setCandidates(nextCandidates);
-    setSelectedIds(
-      new Set(
-        nextCandidates
-          .filter((candidate) => candidate.status === "ready" && candidate.selected)
-          .map((candidate) => candidate.id),
-      ),
+  function applyScanResult(
+    nextCandidates: IngressCandidate[],
+    { append = false }: { append?: boolean } = {},
+  ) {
+    setCandidates((currentCandidates) =>
+      append ? mergeCandidates(currentCandidates, nextCandidates) : nextCandidates,
     );
+    setSelectedIds((currentIds) => {
+      const nextIds = append ? new Set(currentIds) : new Set<string>();
+      for (const candidate of nextCandidates) {
+        if (candidate.status === "ready" && candidate.selected) {
+          nextIds.add(candidate.id);
+        }
+      }
+      return nextIds;
+    });
+    setActiveBatchCandidateIds(new Set(nextCandidates.map((candidate) => candidate.id)));
     setGalleryIndex(0);
+  }
+
+  function applyInstagramBatchMetadata(
+    result: IngressScanResult,
+    { append }: { append: boolean },
+  ) {
+    setInstagramNextCursor(resultNextCursor(result));
+    setInstagramBatchNumber((currentBatchNumber) => (append ? currentBatchNumber + 1 : 1));
+  }
+
+  function clearInstagramBatchState() {
+    setInstagramNextCursor(undefined);
+    setInstagramBatchNumber(0);
   }
 
   async function confirmIngest() {
@@ -460,6 +520,11 @@ export function DataIngressTab({
         >
           Confirm Ingest
         </button>
+        {instagramBatchNumber > 0 && (
+          <button type="button" onClick={loadNextInstagramBatch} disabled={!instagramNextCursor}>
+            Next Batch
+          </button>
+        )}
       </div>
 
       <p aria-live="polite" className="status-line">
@@ -862,6 +927,30 @@ function modeLabel(mode: ViewMode): string {
 
 function browserLabel(browser: string): string {
   return browser[0].toUpperCase() + browser.slice(1);
+}
+
+function resultNextCursor(result: IngressScanResult): string | undefined {
+  const rawCursor = result.metadata_json?.next_cursor;
+  return typeof rawCursor === "string" && rawCursor ? rawCursor : undefined;
+}
+
+function instagramScanStatus(result: IngressScanResult, batchNumber: number): string {
+  const suffix = resultNextCursor(result) ? " More batches available." : " No more batches.";
+  return `Loaded Instagram batch ${batchNumber}: ${result.candidates.length} candidate(s).${suffix}`;
+}
+
+function mergeCandidates(
+  currentCandidates: IngressCandidate[],
+  nextCandidates: IngressCandidate[],
+): IngressCandidate[] {
+  const candidatesById = new Map<string, IngressCandidate>();
+  for (const candidate of currentCandidates) {
+    candidatesById.set(candidate.id, candidate);
+  }
+  for (const candidate of nextCandidates) {
+    candidatesById.set(candidate.id, candidate);
+  }
+  return [...candidatesById.values()];
 }
 
 function parseScanLimit(value: string): number | null {

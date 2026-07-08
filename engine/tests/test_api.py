@@ -301,10 +301,11 @@ def test_ingress_candidates_endpoint_filters_instagram_candidates(client, tmp_pa
 def test_instagram_browser_scan_endpoint_stores_thumbnail_candidates(
     client, monkeypatch
 ):
-    def fake_scan(url, vault_root, *, browser, limit):
+    def fake_scan(url, vault_root, *, browser, limit, cursor):
         assert url == "https://www.instagram.com/reel/browser/"
         assert browser == "chrome"
         assert limit == 8
+        assert cursor == "cursor_2"
         return IngressScanResult(
             candidates=[
                 IngressCandidate(
@@ -321,7 +322,12 @@ def test_instagram_browser_scan_endpoint_stores_thumbnail_candidates(
 
     response = client.post(
         "/ingress/instagram/browser-scan",
-        json={"url": "https://www.instagram.com/reel/browser/", "browser": "chrome", "limit": 8},
+        json={
+            "url": "https://www.instagram.com/reel/browser/",
+            "browser": "chrome",
+            "limit": 8,
+            "cursor": "cursor_2",
+        },
     )
 
     assert response.status_code == 200

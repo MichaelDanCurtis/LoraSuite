@@ -2,7 +2,8 @@ import json
 import ssl
 import subprocess
 import sys
-from base64 import b64encode
+from binascii import Error as BinasciiError
+from base64 import b64decode, b64encode
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from lorasuite_engine.social_helper import scan_instagram_helper_payload
 
 MetadataExtractor = Callable[[str, str], dict[str, Any]]
 ProfileFetcher = Callable[[str, str], dict[str, Any]]
+ProfilePageFetcher = Callable[[str, str, int, str | None], dict[str, Any]]
 ProfileReelsFetcher = Callable[[str, str, int], dict[str, Any]]
 ThumbnailFetcher = Callable[[str], tuple[bytes, str]]
 
@@ -50,20 +52,36 @@ def scan_instagram_url_with_browser_cookies(
     browser: str = "chrome",
     metadata_extractor: MetadataExtractor | None = None,
     profile_fetcher: ProfileFetcher | None = None,
+    profile_page_fetcher: ProfilePageFetcher | None = None,
     profile_reels_fetcher: ProfileReelsFetcher | None = None,
     thumbnail_fetcher: ThumbnailFetcher | None = None,
     limit: int = PROFILE_REELS_PAGE_SIZE,
+    cursor: str | None = None,
 ) -> IngressScanResult:
     normalized_url = _validate_instagram_url(url)
     normalized_browser = _validate_browser(browser)
     scan_limit = _validate_scan_limit(limit)
+    cursor_state = _decode_scan_cursor(cursor)
     extractor = metadata_extractor or _extract_metadata_with_ytdlp
     profile_fetcher_impl = profile_fetcher or _fetch_profile_with_browser_cookies
+    profile_page_fetcher_impl = profile_page_fetcher or _fetch_profile_page_with_browser_cookies
     reels_fetcher = profile_reels_fetcher or _fetch_profile_reels_with_browser_cookies
     fetcher = thumbnail_fetcher or _fetch_thumbnail
 
     profile_reels_username = _profile_reels_username(normalized_url)
     if profile_reels_username is not None:
+        if profile_page_fetcher is not None or (
+            profile_fetcher is None and profile_reels_fetcher is None
+        ):
+            return _scan_instagram_profile_page(
+                profile_reels_username,
+                vault_root,
+                browser=normalized_browser,
+                limit=scan_limit,
+                cursor_state=cursor_state,
+                profile_page_fetcher=profile_page_fetcher_impl,
+                thumbnail_fetcher=fetcher,
+            )
         profile_metadata = profile_fetcher_impl(profile_reels_username, normalized_browser)
         reels_metadata = reels_fetcher(
             profile_reels_username,
@@ -78,6 +96,18 @@ def scan_instagram_url_with_browser_cookies(
             limit=scan_limit,
         )
     elif (profile_username := _profile_username(normalized_url)) is not None:
+        if profile_page_fetcher is not None or (
+            profile_fetcher is None and profile_reels_fetcher is None
+        ):
+            return _scan_instagram_profile_page(
+                profile_username,
+                vault_root,
+                browser=normalized_browser,
+                limit=scan_limit,
+                cursor_state=cursor_state,
+                profile_page_fetcher=profile_page_fetcher_impl,
+                thumbnail_fetcher=fetcher,
+            )
         profile_metadata = profile_fetcher_impl(profile_username, normalized_browser)
         reels_metadata = reels_fetcher(
             profile_username,
@@ -99,6 +129,34 @@ def scan_instagram_url_with_browser_cookies(
             thumbnail_fetcher=fetcher,
         )
     return scan_instagram_helper_payload(payload, vault_root)
+
+
+def _scan_instagram_profile_page(
+    username: str,
+    vault_root: Path,
+    *,
+    browser: str,
+    limit: int,
+    cursor_state: dict[str, str],
+    profile_page_fetcher: ProfilePageFetcher,
+    thumbnail_fetcher: ThumbnailFetcher,
+) -> IngressScanResult:
+    profile_metadata = profile_page_fetcher(
+        username,
+        browser,
+        limit,
+        cursor_state.get("profile"),
+    )
+    payload = _helper_payload_from_instagram_profile_payload(
+        profile_metadata,
+        {"items": []},
+        browser=browser,
+        thumbnail_fetcher=thumbnail_fetcher,
+        limit=limit,
+    )
+    result = scan_instagram_helper_payload(payload, vault_root)
+    result.metadata_json = _profile_pagination_metadata(profile_metadata, limit)
+    return result
 
 
 def _extract_metadata_with_ytdlp(url: str, browser: str) -> dict[str, Any]:
@@ -180,6 +238,42 @@ def _fetch_profile_with_browser_cookies(username: str, browser: str) -> dict[str
     if _iter_instagram_profile_media(feed_payload):
         return feed_payload
     return profile_payload
+
+
+def _fetch_profile_page_with_browser_cookies(
+    username: str,
+    browser: str,
+    page_size: int,
+    cursor: str | None,
+) -> dict[str, Any]:
+    cookie_jar = _extract_browser_cookies(browser)
+    opener = build_opener(
+        HTTPCookieProcessor(cookie_jar),
+        HTTPSHandler(context=_ssl_context()),
+    )
+    referer = f"https://www.instagram.com/{username}/"
+    profile_payload = _request_instagram_json(
+        opener,
+        "https://www.instagram.com/api/v1/users/web_profile_info/?"
+        + urlencode({"username": username}),
+        headers=_instagram_json_headers(referer),
+    )
+    user = ((profile_payload.get("data") or {}).get("user") or {})
+    user_id = str(user.get("id") or "").strip()
+    if not user_id:
+        raise InstagramBrowserScanError(
+            f"Could not resolve Instagram profile: {username}."
+        )
+
+    query = {"count": str(page_size)}
+    if cursor:
+        query["max_id"] = cursor
+    return _request_instagram_json(
+        opener,
+        f"https://www.instagram.com/api/v1/feed/user/{user_id}/?"
+        + urlencode(query),
+        headers=_instagram_json_headers(referer),
+    )
 
 
 def _fetch_profile_reels_with_browser_cookies(
@@ -650,6 +744,58 @@ def _dedupe_media_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.update(identifiers)
         deduped.append(item)
     return deduped
+
+
+def _profile_pagination_metadata(
+    metadata: dict[str, Any],
+    limit: int,
+) -> dict[str, Any]:
+    next_profile_cursor = _next_profile_cursor(metadata)
+    pagination: dict[str, Any] = {
+        "batch_size": limit,
+        "has_next_batch": next_profile_cursor is not None,
+    }
+    if next_profile_cursor is not None:
+        pagination["next_cursor"] = _encode_scan_cursor(
+            {"profile": next_profile_cursor}
+        )
+    return pagination
+
+
+def _next_profile_cursor(metadata: dict[str, Any]) -> str | None:
+    if metadata.get("more_available") is not True:
+        return None
+
+    for key in ("next_max_id", "profile_grid_items_cursor"):
+        raw_cursor = metadata.get(key)
+        if isinstance(raw_cursor, str) and raw_cursor.strip():
+            return raw_cursor.strip()
+    return None
+
+
+def _encode_scan_cursor(cursor_state: dict[str, str]) -> str:
+    payload = json.dumps(cursor_state, separators=(",", ":")).encode("utf-8")
+    return b64encode(payload).decode("ascii")
+
+
+def _decode_scan_cursor(cursor: str | None) -> dict[str, str]:
+    if cursor is None or not cursor.strip():
+        return {}
+
+    try:
+        raw_payload = b64decode(cursor.encode("ascii"), validate=True)
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (BinasciiError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        raise InstagramBrowserScanError("Invalid Instagram batch cursor.") from error
+
+    if not isinstance(payload, dict):
+        raise InstagramBrowserScanError("Invalid Instagram batch cursor.")
+
+    cursor_state: dict[str, str] = {}
+    for key, value in payload.items():
+        if isinstance(key, str) and isinstance(value, str) and value.strip():
+            cursor_state[key] = value.strip()
+    return cursor_state
 
 
 def _thumbnail_data_url(
