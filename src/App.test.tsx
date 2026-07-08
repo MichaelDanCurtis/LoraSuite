@@ -100,8 +100,8 @@ describe("App", () => {
   it("shows local ingress candidate review controls", () => {
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "Choose Files" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Choose Folder" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import Media" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose Destination" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tile" })).toHaveAttribute(
       "aria-pressed",
       "true",

@@ -1,10 +1,18 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DataIngressTab } from "./DataIngressTab";
 import type { EngineClient } from "../lib/api";
 import type { IngressCandidate, IngressJob } from "../lib/types";
+
+const { openMock } = vi.hoisted(() => ({
+  openMock: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: openMock,
+}));
 
 describe("DataIngressTab", () => {
   const instagramVideoCandidate: IngressCandidate = {
@@ -73,6 +81,10 @@ describe("DataIngressTab", () => {
       ...overrides,
     };
   }
+
+  beforeEach(() => {
+    openMock.mockReset();
+  });
 
   async function scanInstagramUrl(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole("button", { name: "Instagram Source" }));
@@ -182,6 +194,62 @@ describe("DataIngressTab", () => {
     expect(screen.getByLabelText("Select as voice: example reel")).toBeChecked();
   });
 
+  it("uses one local media picker for files and folders", async () => {
+    const user = userEvent.setup();
+    openMock.mockResolvedValue(["/tmp/portrait.png", "/tmp/session-folder"]);
+    const scanLocalIngress = vi.fn().mockResolvedValue({
+      id: "scan_local",
+      candidates: [instagramPosterCandidate],
+      errors: [],
+    });
+    const engine = engineWith({ scanLocalIngress });
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Import Media" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose Files" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose Folder" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Import Media" }));
+
+    expect(openMock).toHaveBeenCalledWith({
+      multiple: true,
+      recursive: true,
+      title: "Choose files or folders",
+    });
+    expect(scanLocalIngress).toHaveBeenCalledWith(["/tmp/portrait.png", "/tmp/session-folder"], true);
+  });
+
+  it("selects the media destination with a folder picker", async () => {
+    const user = userEvent.setup();
+    openMock.mockResolvedValue("/Volumes/Training/MarySue");
+    const engine = engineWith();
+
+    render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose Destination" }));
+
+    expect(openMock).toHaveBeenCalledWith({
+      directory: true,
+      multiple: false,
+      title: "Choose media destination",
+      canCreateDirectories: true,
+    });
+    expect(screen.getByLabelText("Media destination")).toHaveValue("/Volumes/Training/MarySue");
+  });
+
   it("sends the selected media destination with the ingress job", async () => {
     const user = userEvent.setup();
     const completedJob = {
@@ -225,7 +293,8 @@ describe("DataIngressTab", () => {
     );
 
     await scanInstagramUrl(user);
-    await user.type(screen.getByLabelText("Media destination"), "/Volumes/Training/MarySue");
+    openMock.mockResolvedValue("/Volumes/Training/MarySue");
+    await user.click(screen.getByRole("button", { name: "Choose Destination" }));
     await user.click(screen.getByRole("button", { name: "Confirm Ingest" }));
 
     expect(createIngressJob).toHaveBeenCalledWith({

@@ -88,19 +88,31 @@ export function DataIngressTab({
     candidateForRole(item, "audio"),
   );
 
-  async function chooseFiles() {
+  async function chooseLocalMedia() {
     try {
-      const selected = await open({ multiple: true });
+      const selected = await open({
+        multiple: true,
+        recursive: true,
+        title: "Choose files or folders",
+      });
       await scanDialogSelection(selected);
     } catch (error) {
       setStatus(dialogErrorMessage(error));
     }
   }
 
-  async function chooseFolder() {
+  async function chooseMediaDestination() {
     try {
-      const selected = await open({ directory: true, multiple: true });
-      await scanDialogSelection(selected);
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose media destination",
+        canCreateDirectories: true,
+      });
+      if (!selected) {
+        return;
+      }
+      setMediaDestination(Array.isArray(selected) ? selected[0] ?? "" : selected);
     } catch (error) {
       setStatus(dialogErrorMessage(error));
     }
@@ -390,162 +402,163 @@ export function DataIngressTab({
         <p>Scan local media, review candidates, then confirm only what should enter the vault.</p>
       </div>
 
-      <div className="ingress-layout">
-        <aside className="source-panel" aria-label="Ingress sources">
-          <div className="panel-header">
-            <h3>Sources</h3>
-          </div>
-          <div className="ingress-actions" aria-label="Ingress source actions">
-            <button className="primary-action" type="button" onClick={chooseFiles}>
-              Choose Files
-            </button>
-            <button type="button" onClick={chooseFolder}>
-              Choose Folder
-            </button>
-            <button
-              type="button"
-              aria-label="Instagram Source"
-              onClick={() => setShowInstagramHelper((visible) => !visible)}
-            >
-              Instagram
-            </button>
-            <button type="button" disabled>
-              X
-            </button>
-          </div>
-          <label htmlFor="media-destination">
-            Media destination
+      <div className="ingress-topbar" aria-label="Ingress source actions">
+        <div className="ingress-actions">
+          <button className="primary-action" type="button" onClick={chooseLocalMedia}>
+            Import Media
+          </button>
+          <button
+            type="button"
+            aria-label="Instagram Source"
+            onClick={() => setShowInstagramHelper((visible) => !visible)}
+          >
+            Instagram
+          </button>
+          <button type="button" disabled>
+            X
+          </button>
+        </div>
+        <label className="destination-picker" htmlFor="media-destination">
+          Media destination
+          <div className="destination-row">
             <input
               id="media-destination"
               value={mediaDestination}
-              onChange={(event) => setMediaDestination(event.target.value)}
+              readOnly
               placeholder="Default LoraSuite vault"
             />
-          </label>
+            <button type="button" onClick={chooseMediaDestination}>
+              Choose Destination
+            </button>
+          </div>
+        </label>
+      </div>
 
-          {showInstagramHelper && (
-            <div className="form-stack helper-payload-panel">
-              <label htmlFor="instagram-url">Instagram URL</label>
+      {showInstagramHelper && (
+        <div className="form-stack helper-payload-panel instagram-panel">
+          <label htmlFor="instagram-url">Instagram URL</label>
+          <input
+            id="instagram-url"
+            value={instagramUrl}
+            onChange={(event) => setInstagramUrl(event.target.value)}
+            placeholder="https://www.instagram.com/reel/..."
+          />
+          <div className="field-row">
+            <label htmlFor="instagram-browser">
+              Browser cookies
+              <select
+                id="instagram-browser"
+                value={instagramBrowser}
+                onChange={(event) => setInstagramBrowser(event.target.value)}
+              >
+                {browserCookieSources.map((browser) => (
+                  <option key={browser} value={browser}>
+                    {browserLabel(browser)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label htmlFor="instagram-scan-limit">
+              Scan limit
               <input
-                id="instagram-url"
-                value={instagramUrl}
-                onChange={(event) => setInstagramUrl(event.target.value)}
-                placeholder="https://www.instagram.com/reel/..."
+                id="instagram-scan-limit"
+                min="1"
+                max="100"
+                step="1"
+                type="number"
+                value={instagramScanLimit}
+                onChange={(event) => setInstagramScanLimit(event.target.value)}
               />
-              <div className="field-row">
-                <label htmlFor="instagram-browser">
-                  Browser cookies
-                  <select
-                    id="instagram-browser"
-                    value={instagramBrowser}
-                    onChange={(event) => setInstagramBrowser(event.target.value)}
-                  >
-                    {browserCookieSources.map((browser) => (
-                      <option key={browser} value={browser}>
-                        {browserLabel(browser)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label htmlFor="instagram-scan-limit">
-                  Scan limit
-                  <input
-                    id="instagram-scan-limit"
-                    min="1"
-                    max="100"
-                    step="1"
-                    type="number"
-                    value={instagramScanLimit}
-                    onChange={(event) => setInstagramScanLimit(event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="scan-target-field">
-                <span id="instagram-scan-mode-label">Scan target</span>
-                <div
-                  className="segmented-control"
-                  role="group"
-                  aria-labelledby="instagram-scan-mode-label"
-                >
-                  {instagramScanModes.map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={instagramScanMode === mode}
-                      onClick={() => setInstagramScanMode(mode)}
-                    >
-                      {instagramScanModeLabel(mode)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="source-actions-row">
-                <button type="button" onClick={scanInstagramBrowserUrl}>
-                  Scan Instagram
-                </button>
+            </label>
+          </div>
+          <div className="scan-target-field">
+            <span id="instagram-scan-mode-label">Scan target</span>
+            <div
+              className="segmented-control"
+              role="group"
+              aria-labelledby="instagram-scan-mode-label"
+            >
+              {instagramScanModes.map((mode) => (
                 <button
+                  key={mode}
                   type="button"
-                  aria-label="Advanced Fallbacks"
-                  onClick={() => setShowAdvancedFallbacks((visible) => !visible)}
+                  aria-pressed={instagramScanMode === mode}
+                  onClick={() => setInstagramScanMode(mode)}
                 >
-                  Advanced
+                  {instagramScanModeLabel(mode)}
                 </button>
-              </div>
-              {showAdvancedFallbacks && (
-                <div className="advanced-fallbacks">
-                  <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
-                  <textarea
-                    id="instagram-helper-payload"
-                    value={instagramPayloadText}
-                    onChange={(event) => setInstagramPayloadText(event.target.value)}
-                    rows={8}
-                  />
-                  <button type="button" onClick={scanInstagramHelperPayload}>
-                    Scan Instagram Helper Payload
-                  </button>
-                  <button type="button" onClick={loadInstagramHelperCandidates}>
-                    Load Helper Candidates
-                  </button>
-                  <label htmlFor="manual-paths">Manual path fallback</label>
-                  <textarea
-                    id="manual-paths"
-                    value={manualPaths}
-                    onChange={(event) => setManualPaths(event.target.value)}
-                    rows={3}
-                    placeholder="/absolute/path/to/file-or-folder"
-                  />
-                  <button type="button" onClick={scanManualPaths}>
-                    Scan Manual Paths
-                  </button>
-                </div>
-              )}
+              ))}
+            </div>
+          </div>
+          <div className="source-actions-row">
+            <button type="button" onClick={scanInstagramBrowserUrl}>
+              Scan Instagram
+            </button>
+            <button
+              type="button"
+              aria-label="Advanced Fallbacks"
+              onClick={() => setShowAdvancedFallbacks((visible) => !visible)}
+            >
+              Advanced
+            </button>
+          </div>
+          {showAdvancedFallbacks && (
+            <div className="advanced-fallbacks">
+              <label htmlFor="instagram-helper-payload">Instagram helper payload</label>
+              <textarea
+                id="instagram-helper-payload"
+                value={instagramPayloadText}
+                onChange={(event) => setInstagramPayloadText(event.target.value)}
+                rows={8}
+              />
+              <button type="button" onClick={scanInstagramHelperPayload}>
+                Scan Instagram Helper Payload
+              </button>
+              <button type="button" onClick={loadInstagramHelperCandidates}>
+                Load Helper Candidates
+              </button>
+              <label htmlFor="manual-paths">Manual path fallback</label>
+              <textarea
+                id="manual-paths"
+                value={manualPaths}
+                onChange={(event) => setManualPaths(event.target.value)}
+                rows={3}
+                placeholder="/absolute/path/to/file-or-folder"
+              />
+              <button type="button" onClick={scanManualPaths}>
+                Scan Manual Paths
+              </button>
             </div>
           )}
+        </div>
+      )}
 
-          <p aria-live="polite" className="status-line">
-            {status}
-          </p>
+      <div className="ingress-status-strip">
+        <p aria-live="polite" className="status-line">
+          {status}
+        </p>
 
-          <dl className="metric-grid" aria-label="Ingress summary">
-            <div>
-              <dt>Imported</dt>
-              <dd>{mediaItems.length}</dd>
-            </div>
-            <div>
-              <dt>Candidates</dt>
-              <dd>{candidates.length}</dd>
-            </div>
-            <div>
-              <dt>Selected</dt>
-              <dd>{selectedReadyCount}</dd>
-            </div>
-            <div>
-              <dt>Skipped</dt>
-              <dd>{skippedCount}</dd>
-            </div>
-          </dl>
-        </aside>
+        <dl className="metric-grid" aria-label="Ingress summary">
+          <div>
+            <dt>Imported</dt>
+            <dd>{mediaItems.length}</dd>
+          </div>
+          <div>
+            <dt>Candidates</dt>
+            <dd>{candidates.length}</dd>
+          </div>
+          <div>
+            <dt>Selected</dt>
+            <dd>{selectedReadyCount}</dd>
+          </div>
+          <div>
+            <dt>Skipped</dt>
+            <dd>{skippedCount}</dd>
+          </div>
+        </dl>
+      </div>
 
+      <div className="ingress-layout">
         <section className="review-panel" aria-label="Candidate review">
           <div className="panel-header review-header">
             <div>
