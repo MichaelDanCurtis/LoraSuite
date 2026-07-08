@@ -30,6 +30,7 @@ export interface EngineClient {
   listIngressJobs(): Promise<IngressJob[]>;
   getIngressJob(jobId: string): Promise<IngressJob>;
   exportRunComfyImage(request: RunComfyExportRequest): Promise<ExportPackage>;
+  assetUrl(path: string): string;
 }
 
 const defaultBaseUrl =
@@ -102,6 +103,9 @@ export function createEngineClient(
     },
     exportRunComfyImage(request: RunComfyExportRequest) {
       return postJson<ExportPackage>("/exports/runcomfy-image", request);
+    },
+    assetUrl(path: string) {
+      return `${normalizedBaseUrl}/assets/file?path=${encodeURIComponent(path)}`;
     },
   };
 }

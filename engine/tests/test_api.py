@@ -23,6 +23,45 @@ def test_health_endpoint_reports_ok(client):
     assert response.json() == {"status": "ok", "service": "lorasuite-engine"}
 
 
+def test_engine_allows_vite_browser_origin(client):
+    origin = "http://127.0.0.1:5173"
+
+    preflight = client.options(
+        "/ingress/instagram/browser-scan",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    response = client.get("/health", headers={"Origin": origin})
+
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == origin
+    assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_vault_asset_endpoint_serves_files_under_vault(client, tmp_path):
+    preview_path = tmp_path / "vault" / "previews" / "thumb.jpg"
+    preview_path.parent.mkdir(parents=True)
+    Image.new("RGB", (11, 13), color=(20, 40, 60)).save(preview_path)
+
+    response = client.get("/assets/file", params={"path": str(preview_path)})
+
+    assert response.status_code == 200
+    assert response.content == preview_path.read_bytes()
+    assert response.headers["content-type"] == "image/jpeg"
+
+
+def test_vault_asset_endpoint_rejects_files_outside_vault(client, tmp_path):
+    outside_path = tmp_path / "outside.jpg"
+    Image.new("RGB", (11, 13), color=(20, 40, 60)).save(outside_path)
+
+    response = client.get("/assets/file", params={"path": str(outside_path)})
+
+    assert response.status_code == 404
+
+
 def test_create_app_uses_env_vault_root(monkeypatch, tmp_path):
     vault_root = tmp_path / "env-vault"
     monkeypatch.setenv("LORASUITE_VAULT_ROOT", str(vault_root))

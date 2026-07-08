@@ -139,4 +139,12 @@ describe("createEngineClient", () => {
       body: JSON.stringify({ source_kind: "local", candidate_ids: ["candidate_1"] }),
     });
   });
+
+  it("builds engine asset URLs for local vault paths", () => {
+    const client = createEngineClient("http://engine.test/");
+
+    expect(client.assetUrl("/tmp/vault/previews/thumb one.jpg")).toBe(
+      "http://engine.test/assets/file?path=%2Ftmp%2Fvault%2Fpreviews%2Fthumb%20one.jpg",
+    );
+  });
 });

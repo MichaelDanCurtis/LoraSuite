@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 
@@ -417,6 +416,7 @@ export function DataIngressTab({
               <TileView
                 candidates={visibleCandidates}
                 selectedIds={selectedIds}
+                assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
               />
             )}
@@ -424,6 +424,7 @@ export function DataIngressTab({
               <ListView
                 candidates={visibleCandidates}
                 selectedIds={selectedIds}
+                assetUrl={engine.assetUrl}
                 onToggleCandidate={toggleCandidate}
               />
             )}
@@ -433,6 +434,7 @@ export function DataIngressTab({
                 currentIndex={safeGalleryIndex}
                 total={visibleCandidates.length}
                 selected={selectedIds.has(galleryCandidate.id)}
+                assetUrl={engine.assetUrl}
                 onToggleCandidate={() => toggleCandidate(galleryCandidate.id)}
                 onPrevious={() => setGalleryIndex(Math.max(0, safeGalleryIndex - 1))}
                 onNext={() =>
@@ -484,15 +486,16 @@ export function DataIngressTab({
 interface CandidateViewProps {
   candidates: IngressCandidate[];
   selectedIds: Set<string>;
+  assetUrl(path: string): string;
   onToggleCandidate(candidateId: string): void;
 }
 
-function TileView({ candidates, selectedIds, onToggleCandidate }: CandidateViewProps) {
+function TileView({ candidates, selectedIds, assetUrl, onToggleCandidate }: CandidateViewProps) {
   return (
     <div className="candidate-grid">
       {candidates.map((candidate) => (
         <article className="candidate-tile" key={candidate.id}>
-          <CandidateThumbnail candidate={candidate} />
+          <CandidateThumbnail candidate={candidate} assetUrl={assetUrl} />
           <div className="candidate-body">
             <label>
               <input
@@ -557,6 +560,7 @@ interface GalleryViewProps {
   currentIndex: number;
   total: number;
   selected: boolean;
+  assetUrl(path: string): string;
   onToggleCandidate(): void;
   onPrevious(): void;
   onNext(): void;
@@ -567,13 +571,14 @@ function GalleryView({
   currentIndex,
   total,
   selected,
+  assetUrl,
   onToggleCandidate,
   onPrevious,
   onNext,
 }: GalleryViewProps) {
   return (
     <div className="gallery-review">
-      <CandidateThumbnail candidate={candidate} large />
+      <CandidateThumbnail candidate={candidate} assetUrl={assetUrl} large />
       <div className="gallery-details">
         <p className="muted">
           {currentIndex + 1} of {total}
@@ -606,12 +611,15 @@ function GalleryView({
 
 function CandidateThumbnail({
   candidate,
+  assetUrl,
   large = false,
 }: {
   candidate: IngressCandidate;
+  assetUrl(path: string): string;
   large?: boolean;
 }) {
-  const thumbnail = fileUrl(candidate.thumbnail_path ?? candidate.poster_asset_path);
+  const thumbnailPath = candidate.thumbnail_path ?? candidate.poster_asset_path;
+  const thumbnail = thumbnailPath ? assetUrl(thumbnailPath) : undefined;
   return (
     <div className={large ? "candidate-thumb large" : "candidate-thumb"}>
       {thumbnail ? (
@@ -655,15 +663,6 @@ function formatBytes(bytes?: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function fileUrl(path?: string | null): string | undefined {
-  if (!path) return undefined;
-  try {
-    return convertFileSrc(path);
-  } catch {
-    return `file://${path}`;
-  }
 }
 
 function upsertJob(jobs: IngressJob[], job: IngressJob): IngressJob[] {

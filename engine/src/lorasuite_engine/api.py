@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from lorasuite_engine.exports import create_runcomfy_image_export
@@ -58,6 +60,17 @@ def default_vault_root() -> Path:
 
 def create_app(vault_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="LoraSuite Engine")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "tauri://localhost",
+        ],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.vault_root = vault_root or default_vault_root()
 
     def ingress_service() -> IngressService:
@@ -66,6 +79,13 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "lorasuite-engine"}
+
+    @app.get("/assets/file")
+    def read_vault_asset(path: Path = Query(...)) -> FileResponse:
+        asset_path = _validated_vault_asset_path(path, app.state.vault_root)
+        if asset_path is None:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        return FileResponse(asset_path)
 
     @app.post("/vault/import/local")
     def import_local(request: LocalImportRequest) -> dict[str, list[dict]]:
@@ -152,3 +172,15 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
         return job.model_dump(mode="json")
 
     return app
+
+
+def _validated_vault_asset_path(path: Path, vault_root: Path) -> Path | None:
+    try:
+        resolved_path = Path(path).resolve(strict=True)
+        resolved_vault = Path(vault_root).resolve(strict=True)
+    except OSError:
+        return None
+
+    if not resolved_path.is_file() or not resolved_path.is_relative_to(resolved_vault):
+        return None
+    return resolved_path

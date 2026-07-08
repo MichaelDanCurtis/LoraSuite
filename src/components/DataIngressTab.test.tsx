@@ -57,6 +57,7 @@ describe("DataIngressTab", () => {
       listIngressJobs: vi.fn(),
       getIngressJob: vi.fn().mockResolvedValue(completedJob),
       exportRunComfyImage: vi.fn(),
+      assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
     };
 
     render(
@@ -77,5 +78,53 @@ describe("DataIngressTab", () => {
     expect(
       screen.getByText("Ingress complete; original downloads deferred: 0 imported, 1 deferred, 0 failed."),
     ).toBeInTheDocument();
+  });
+
+  it("renders scanned thumbnails through the engine asset endpoint", async () => {
+    const user = userEvent.setup();
+    const candidate: IngressCandidate = {
+      id: "candidate_image",
+      source_kind: "instagram",
+      source_locator: "https://www.instagram.com/reel/example/#poster",
+      display_name: "example poster",
+      media_type: "image",
+      thumbnail_path: "/tmp/vault/previews/social/poster.jpg",
+      status: "ready",
+      selected: true,
+    };
+    const engine: EngineClient = {
+      importLocal: vi.fn(),
+      scanLocalIngress: vi.fn(),
+      scanInstagramBrowserUrl: vi.fn(),
+      scanInstagramHelperPayload: vi.fn().mockResolvedValue({
+        id: "scan_1",
+        candidates: [candidate],
+        errors: [],
+      }),
+      listIngressCandidates: vi.fn(),
+      createIngressJob: vi.fn(),
+      listIngressJobs: vi.fn(),
+      getIngressJob: vi.fn(),
+      exportRunComfyImage: vi.fn(),
+      assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
+    };
+
+    const { container } = render(
+      <DataIngressTab
+        engine={engine}
+        mediaItems={[]}
+        onMediaItemsImported={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Instagram Source" }));
+    await user.click(screen.getByRole("button", { name: "Scan Instagram Helper Payload" }));
+
+    const image = container.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe(
+      "http://engine.test/assets/file?path=%2Ftmp%2Fvault%2Fpreviews%2Fsocial%2Fposter.jpg",
+    );
+    expect(engine.assetUrl).toHaveBeenCalledWith("/tmp/vault/previews/social/poster.jpg");
   });
 });
