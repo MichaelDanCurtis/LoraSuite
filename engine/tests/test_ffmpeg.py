@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import lorasuite_engine.ffmpeg as ffmpeg_module
-from lorasuite_engine.ffmpeg import extract_frames
+from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
 
 
 ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
@@ -188,3 +188,72 @@ def test_failed_ffmpeg_run_does_not_leave_public_output_frames(tmp_path: Path, m
         )
 
     assert list(output_dir.glob("frame_*.png")) == []
+
+
+@ffmpeg
+def test_probe_video_returns_duration_dimensions_and_fps(tmp_path: Path):
+    video_path = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=40x24:rate=5:duration=2",
+            "-pix_fmt",
+            "yuv420p",
+            str(video_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metadata = probe_video(video_path)
+
+    assert metadata.width == 40
+    assert metadata.height == 24
+    assert metadata.duration_seconds > 1.5
+    assert metadata.fps == 5
+
+
+@ffmpeg
+def test_extract_audio_writes_wav_from_video(tmp_path: Path):
+    video_path = tmp_path / "source_with_audio.mp4"
+    output_path = tmp_path / "audio" / "source.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=32x32:rate=4:duration=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            str(video_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    audio_path = extract_audio(video_path=video_path, output_path=output_path)
+
+    assert audio_path == output_path
+    assert audio_path.exists()
+    assert audio_path.stat().st_size > 0
