@@ -41,6 +41,7 @@ export interface EngineClient {
   createProcessingJob(request: CreateProcessingJobRequest): Promise<ProcessingJob>;
   listProcessingJobs(): Promise<ProcessingJob[]>;
   getProcessingJob(jobId: string): Promise<ProcessingJob>;
+  processProcessingJob(jobId: string): Promise<ProcessingJob>;
   exportRunComfyImage(request: RunComfyExportRequest): Promise<ExportPackage>;
   assetUrl(path: string): string;
 }
@@ -133,6 +134,9 @@ export function createEngineClient(
     },
     getProcessingJob(jobId: string) {
       return getJson<ProcessingJob>(`/processing/jobs/${jobId}`);
+    },
+    processProcessingJob(jobId: string) {
+      return postJson<ProcessingJob>(`/processing/jobs/${jobId}/process`, {});
     },
     exportRunComfyImage(request: RunComfyExportRequest) {
       return postJson<ExportPackage>("/exports/runcomfy-image", request);

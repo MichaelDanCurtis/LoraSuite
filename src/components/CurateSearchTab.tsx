@@ -5,7 +5,14 @@ import type { MediaItem, MediaType, ProcessingJob, ProcessingJobStatus } from ".
 
 interface CurateSearchTabProps {
   mediaItems: MediaItem[];
-  engine: Pick<EngineClient, "assetUrl" | "createProcessingJob" | "getProcessingJob">;
+  engine: Pick<
+    EngineClient,
+    | "assetUrl"
+    | "createProcessingJob"
+    | "getProcessingJob"
+    | "listProcessingJobs"
+    | "processProcessingJob"
+  >;
   isActive?: boolean;
   onSendToIdentify(items: MediaItem[]): void;
   onMediaItemsGenerated(items: MediaItem[]): void;
@@ -108,14 +115,21 @@ export function CurateSearchTab({
           selectedBreakdownVideoIds.length === 1 ? "" : "s"
         }.`,
       );
-      const job = await engine.createProcessingJob({
-        job_type: "video_breakdown",
-        source_media_item_ids: selectedBreakdownVideoIds,
-        options: {
-          generate_frames: true,
-          extract_audio: true,
-        },
-      });
+      const existingJob = await findReusableProcessingJob(
+        selectedBreakdownVideoIds,
+        engine.listProcessingJobs,
+      );
+      const job =
+        existingJob === undefined
+          ? await engine.createProcessingJob({
+              job_type: "video_breakdown",
+              source_media_item_ids: selectedBreakdownVideoIds,
+              options: {
+                generate_frames: true,
+                extract_audio: true,
+              },
+            })
+          : await engine.processProcessingJob(existingJob.id);
       setStatus(processingJobStatusMessage(job));
 
       const detail = await pollProcessingJob(job.id, engine.getProcessingJob, (nextDetail) => {
@@ -351,6 +365,24 @@ async function pollProcessingJob(
   throw new Error(
     `Video breakdown job ${jobId} did not finish after ${PROCESSING_JOB_MAX_DETAIL_ATTEMPTS} checks.`,
   );
+}
+
+async function findReusableProcessingJob(
+  sourceMediaItemIds: string[],
+  listProcessingJobs: EngineClient["listProcessingJobs"],
+): Promise<ProcessingJob | undefined> {
+  const selectedKey = sourceSetKey(sourceMediaItemIds);
+  const jobs = await listProcessingJobs();
+  return jobs.find(
+    (job) =>
+      job.job_type === "video_breakdown" &&
+      !terminalProcessingStatuses.has(job.status) &&
+      sourceSetKey(job.source_media_item_ids) === selectedKey,
+  );
+}
+
+function sourceSetKey(sourceMediaItemIds: string[]): string {
+  return [...sourceMediaItemIds].sort().join("\u0000");
 }
 
 function delay(milliseconds: number): Promise<void> {

@@ -262,6 +262,39 @@ describe("createEngineClient", () => {
     expect(result.derived_media_items[0].id).toBe("audio_1");
   });
 
+  it("processes an existing processing job by id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "processing_1",
+        job_type: "video_breakdown",
+        source_media_item_ids: ["media_1"],
+        options: {},
+        status: "running",
+        progress_message: "Breaking down video media",
+        errors: [],
+        derived_media_items: [],
+        created_at: "2026-07-09T12:00:00Z",
+        started_at: "2026-07-09T12:01:00Z",
+        completed_at: null,
+      }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+
+    const result = await client.processProcessingJob("processing_1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://engine.test/processing/jobs/processing_1/process",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(result.status).toBe("running");
+  });
+
   it("builds engine asset URLs for local vault paths", () => {
     const client = createEngineClient("http://engine.test/");
 

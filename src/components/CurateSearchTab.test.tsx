@@ -18,7 +18,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 describe("CurateSearchTab", () => {
   type CurateSearchEngine = Pick<
     EngineClient,
-    "assetUrl" | "createProcessingJob" | "getProcessingJob"
+    | "assetUrl"
+    | "createProcessingJob"
+    | "getProcessingJob"
+    | "listProcessingJobs"
+    | "processProcessingJob"
   >;
 
   const mediaItems: MediaItem[] = [
@@ -143,6 +147,7 @@ describe("CurateSearchTab", () => {
     ];
     const engine = engineStub({
       assetUrl: vi.fn((path: string) => `/asset/${path}`),
+      listProcessingJobs: vi.fn().mockResolvedValue([]),
       createProcessingJob: vi.fn().mockResolvedValue({
         id: "processing_1",
         job_type: "video_breakdown",
@@ -200,6 +205,57 @@ describe("CurateSearchTab", () => {
     expect(engine.getProcessingJob).toHaveBeenCalledWith("processing_1");
     expect(onMediaItemsGenerated).toHaveBeenCalledWith(generatedItems);
     expect(screen.getByText("Generated 2 derivative media items.")).toBeInTheDocument();
+  });
+
+  it("reuses existing non-terminal breakdown jobs for the same selected videos", async () => {
+    const user = userEvent.setup();
+    const generatedItems: MediaItem[] = [
+      {
+        id: "media_frame_reused",
+        raw_path: "/tmp/vault/derived/video/frame-reused.png",
+        media_type: "image",
+        width: 1920,
+        height: 1080,
+        status: "new",
+      },
+    ];
+    const engine = engineStub({
+      listProcessingJobs: vi.fn().mockResolvedValue([
+        processingJob({
+          id: "processing_existing",
+          source_media_item_ids: ["media_video"],
+          status: "running",
+        }),
+      ]),
+      processProcessingJob: vi
+        .fn()
+        .mockResolvedValue(processingJob({ id: "processing_existing", status: "running" })),
+      getProcessingJob: vi.fn().mockResolvedValue(
+        processingJob({
+          id: "processing_existing",
+          status: "complete",
+          derived_media_items: generatedItems,
+        }),
+      ),
+    });
+    const onMediaItemsGenerated = vi.fn();
+
+    render(
+      <CurateSearchTab
+        mediaItems={mediaItems}
+        engine={engine}
+        onSendToIdentify={vi.fn()}
+        onMediaItemsGenerated={onMediaItemsGenerated}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Select for Breakdown: video.mp4"));
+    await user.click(screen.getByRole("button", { name: "Break Down Selected Videos" }));
+
+    await waitFor(() => expect(engine.listProcessingJobs).toHaveBeenCalledOnce());
+    expect(engine.createProcessingJob).not.toHaveBeenCalled();
+    expect(engine.processProcessingJob).toHaveBeenCalledWith("processing_existing");
+    expect(onMediaItemsGenerated).toHaveBeenCalledWith(generatedItems);
   });
 
   it("polls queued and running video breakdown jobs until generated media are available", async () => {
@@ -423,8 +479,12 @@ describe("CurateSearchTab", () => {
   function engineStub(overrides: Partial<CurateSearchEngine> = {}): CurateSearchEngine {
     return {
       assetUrl: vi.fn((path: string) => `/asset/${path}`),
+      listProcessingJobs: vi.fn().mockResolvedValue([]),
       createProcessingJob: vi.fn().mockRejectedValue(new Error("Unexpected processing job")),
       getProcessingJob: vi.fn().mockRejectedValue(new Error("Unexpected processing job detail")),
+      processProcessingJob: vi
+        .fn()
+        .mockRejectedValue(new Error("Unexpected processing job process")),
       ...overrides,
     };
   }

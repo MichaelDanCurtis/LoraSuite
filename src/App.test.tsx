@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 describe("App", () => {
   beforeEach(() => {
     isTauriMock.mockReturnValue(true);
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -24,20 +25,70 @@ describe("App", () => {
   it("shows the four workspace tabs", () => {
     render(<App />);
 
-    expect(screen.getByRole("tab", { name: "Data Ingress" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Curate / Search" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Video Review" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Exports" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Data Ingest" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Curate" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Identify" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Train" })).toBeInTheDocument();
   });
 
   it("switches workspace tabs", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("tab", { name: "Curate / Search" }));
+    await user.click(screen.getByRole("tab", { name: "Curate" }));
 
-    expect(screen.getByRole("heading", { name: "Curate / Search" })).toBeInTheDocument();
-    expect(screen.getByText("PhotoMapAI-derived curation workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Curate" })).toBeInTheDocument();
+    expect(screen.getByText("PhotoMapAI-derived media triage workspace")).toBeInTheDocument();
+  });
+
+  it("reloads completed ingress media into Curate and sends selected images to Identify", async () => {
+    const user = userEvent.setup();
+    const importedImage = {
+      id: "media_imported_portrait",
+      raw_path: "/tmp/vault/raw/imported-portrait.png",
+      media_type: "image",
+      width: 768,
+      height: 1024,
+      status: "new",
+    };
+    const completedJob = {
+      id: "job_1",
+      source_kind: "instagram",
+      candidate_ids: ["candidate_poster"],
+      reviewed_candidate_ids: ["candidate_poster"],
+      candidate_count: 1,
+      selected_count: 1,
+      imported_count: 1,
+      deferred_count: 0,
+      skipped_count: 0,
+      failed_count: 0,
+      status: "complete",
+      progress_message: "Ingress complete",
+      errors: [],
+      deferred_candidates: [],
+      imported_media_items: [importedImage],
+      created_at: "2026-07-08T00:00:00Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [completedJob],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Curate" }));
+
+    expect(await screen.findByText("imported-portrait.png")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Select for Identify: imported-portrait.png"));
+    await user.click(screen.getByRole("button", { name: "Send to Identify" }));
+    await user.click(screen.getByRole("tab", { name: "Identify" }));
+
+    expect(screen.getByRole("heading", { name: "Identify" })).toBeInTheDocument();
+    expect(screen.getByText("imported-portrait.png")).toBeInTheDocument();
+    expect(screen.getByText("1 target candidate")).toBeInTheDocument();
   });
 
   it("keeps ingress candidates when switching away from data ingress", async () => {
@@ -75,31 +126,19 @@ describe("App", () => {
 
     expect(await screen.findByText("persisted candidate")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Curate / Search" }));
-    expect(screen.getByRole("heading", { name: "Curate / Search" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Curate" }));
+    expect(screen.getByRole("heading", { name: "Curate" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Data Ingress" }));
+    await user.click(screen.getByRole("tab", { name: "Data Ingest" }));
 
     expect(screen.getByText("persisted candidate")).toBeInTheDocument();
-  });
-
-  it("shows segment intent guidance in video review", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(screen.getByRole("tab", { name: "Video Review" }));
-    await user.click(screen.getByLabelText("Use for image training"));
-    await user.click(screen.getByLabelText("Use for voice training / cloning"));
-
-    expect(screen.getByText("Extract sparse keyframes from stable visual ranges.")).toBeInTheDocument();
-    expect(screen.getByText("Prefer clean speech with one speaker and low noise.")).toBeInTheDocument();
   });
 
   it("shows RunComfy export controls", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("tab", { name: "Exports" }));
+    await user.click(screen.getByRole("tab", { name: "Train" }));
 
     expect(screen.getByLabelText("Frame paths")).toBeInTheDocument();
     expect(screen.getByLabelText("Output folder")).toBeInTheDocument();

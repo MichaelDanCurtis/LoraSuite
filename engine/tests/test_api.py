@@ -455,8 +455,60 @@ def test_create_processing_job_rejects_empty_source_media_item_ids(
     assert scheduled_tasks == []
 
 
+def test_create_processing_job_rejects_unbounded_video_options(client):
+    response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": ["media_video_1"],
+            "options": {
+                "frames_per_second": 9,
+                "max_frame_count": 601,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_processing_job_detail_returns_404_for_missing_job(client):
     response = client.get("/processing/jobs/missing_job")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Processing job not found"
+
+
+def test_processing_job_process_endpoint_schedules_existing_job(client, monkeypatch):
+    scheduled_tasks = []
+
+    def capture_task(self, func, *args, **kwargs):
+        scheduled_tasks.append((func, args, kwargs))
+
+    monkeypatch.setattr(api_module.BackgroundTasks, "add_task", capture_task)
+    create_response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": ["media_video_1"],
+            "options": {"max_frame_count": 2},
+        },
+    )
+    job_id = create_response.json()["id"]
+    scheduled_tasks.clear()
+
+    response = client.post(f"/processing/jobs/{job_id}/process")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == job_id
+    assert len(scheduled_tasks) == 1
+    scheduled_func, scheduled_args, scheduled_kwargs = scheduled_tasks[0]
+    assert scheduled_func.__name__ == "process_job"
+    assert scheduled_args == (job_id,)
+    assert scheduled_kwargs == {}
+
+
+def test_processing_job_process_endpoint_returns_404_for_missing_job(client):
+    response = client.post("/processing/jobs/missing_job/process")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Processing job not found"

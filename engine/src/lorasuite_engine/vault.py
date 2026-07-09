@@ -18,6 +18,7 @@ from lorasuite_engine.models import (
     MediaType,
     SourceKind,
 )
+from lorasuite_engine.storage import atomic_write_json, json_file_lock
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".aac", ".m4a", ".mp3", ".wav"})
@@ -154,22 +155,19 @@ class VaultService:
     def append_media_items(self, media_items: list[MediaItem]) -> None:
         if not media_items:
             return
-        manifest = self._read_manifest()
-        media_items_json = manifest.setdefault("media_items", [])
-        existing_ids = {
-            item.get("id")
-            for item in media_items_json
-            if isinstance(item, dict)
-        }
-        for media_item in media_items:
-            if media_item.id not in existing_ids:
-                media_items_json.append(media_item.model_dump(mode="json"))
-                existing_ids.add(media_item.id)
-        self.vault_root.mkdir(parents=True, exist_ok=True)
-        self.manifest_path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        with json_file_lock(self.manifest_path):
+            manifest = self._read_manifest_unlocked()
+            media_items_json = manifest.setdefault("media_items", [])
+            existing_ids = {
+                item.get("id")
+                for item in media_items_json
+                if isinstance(item, dict)
+            }
+            for media_item in media_items:
+                if media_item.id not in existing_ids:
+                    media_items_json.append(media_item.model_dump(mode="json"))
+                    existing_ids.add(media_item.id)
+            atomic_write_json(self.manifest_path, manifest)
 
     def build_derivative_media_item(
         self,
@@ -263,19 +261,27 @@ class VaultService:
     def _write_manifest(
         self, manifest: dict[str, Any], source: MediaSource, media_items: list[MediaItem]
     ) -> None:
-        sources = manifest.setdefault("sources", [])
-        media_items_json = manifest.setdefault("media_items", [])
-        sources.append(source.model_dump(mode="json"))
-        media_items_json.extend(
-            media_item.model_dump(mode="json") for media_item in media_items
-        )
-        self.vault_root.mkdir(parents=True, exist_ok=True)
-        self.manifest_path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        with json_file_lock(self.manifest_path):
+            current_manifest = self._read_manifest_unlocked()
+            sources = current_manifest.setdefault("sources", [])
+            media_items_json = current_manifest.setdefault("media_items", [])
+            existing_ids = {
+                item.get("id")
+                for item in media_items_json
+                if isinstance(item, dict)
+            }
+            sources.append(source.model_dump(mode="json"))
+            for media_item in media_items:
+                if media_item.id not in existing_ids:
+                    media_items_json.append(media_item.model_dump(mode="json"))
+                    existing_ids.add(media_item.id)
+            atomic_write_json(self.manifest_path, current_manifest)
 
     def _read_manifest(self) -> dict[str, Any]:
+        with json_file_lock(self.manifest_path):
+            return self._read_manifest_unlocked()
+
+    def _read_manifest_unlocked(self) -> dict[str, Any]:
         if not self.manifest_path.exists():
             return {"sources": [], "media_items": []}
 

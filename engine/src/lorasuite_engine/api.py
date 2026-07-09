@@ -208,6 +208,18 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
     def list_processing_jobs() -> list[dict[str, object]]:
         return [job.model_dump(mode="json") for job in processing_service().list_jobs()]
 
+    @app.post("/processing/jobs/{job_id}/process")
+    def process_processing_job(
+        job_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, object]:
+        service = processing_service()
+        job = service.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Processing job not found")
+        background_tasks.add_task(service.process_job, job.id)
+        return job.model_dump(mode="json")
+
     @app.get("/processing/jobs/{job_id}")
     def get_processing_job(job_id: str) -> dict[str, object]:
         job = processing_service().get_job(job_id)

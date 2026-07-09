@@ -120,6 +120,7 @@ describe("DataIngressTab", () => {
       createProcessingJob: vi.fn(),
       listProcessingJobs: vi.fn().mockResolvedValue([]),
       getProcessingJob: vi.fn(),
+      processProcessingJob: vi.fn(),
       exportRunComfyImage: vi.fn(),
       assetUrl: vi.fn((path: string) => `http://engine.test/assets/file?path=${encodeURIComponent(path)}`),
       ...overrides,

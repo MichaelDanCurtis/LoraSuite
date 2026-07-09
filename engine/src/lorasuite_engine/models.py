@@ -177,13 +177,26 @@ class VideoBreakdownOptions(BaseModel):
     frames_per_second: int = 1
     max_frame_count: int = 6
 
-    @field_validator("frames_per_second", "max_frame_count", mode="before")
+    @field_validator("frames_per_second", mode="before")
     @classmethod
-    def positive_integer(cls, value: int) -> int:
+    def bounded_frames_per_second(cls, value: int) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError("value must be an integer")
         if value <= 0:
             raise ValueError("value must be greater than zero")
+        if value > 8:
+            raise ValueError("frames_per_second must be 8 or lower")
+        return value
+
+    @field_validator("max_frame_count", mode="before")
+    @classmethod
+    def bounded_max_frame_count(cls, value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("value must be an integer")
+        if value <= 0:
+            raise ValueError("value must be greater than zero")
+        if value > 600:
+            raise ValueError("max_frame_count must be 600 or lower")
         return value
 
 

@@ -124,6 +124,18 @@ def test_video_breakdown_options_reject_coerced_integer_values(field_name, inval
         VideoBreakdownOptions(**{field_name: invalid_value})
 
 
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("frames_per_second", 9),
+        ("max_frame_count", 601),
+    ],
+)
+def test_video_breakdown_options_reject_unbounded_workloads(field_name, invalid_value):
+    with pytest.raises(ValidationError):
+        VideoBreakdownOptions(**{field_name: invalid_value})
+
+
 def test_vault_can_retrieve_imported_media_item_by_id(tmp_path):
     source_image = tmp_path / "source.png"
     Image.new("RGB", (32, 32), color=(90, 20, 120)).save(source_image)

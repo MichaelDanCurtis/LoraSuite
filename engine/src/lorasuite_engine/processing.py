@@ -13,6 +13,7 @@ from lorasuite_engine.models import (
     VideoBreakdownOptions,
     utc_now,
 )
+from lorasuite_engine.storage import atomic_write_json, json_file_lock
 from lorasuite_engine.vault import VaultService
 
 
@@ -48,24 +49,26 @@ class ProcessingService:
             source_media_item_ids=source_media_item_ids,
             options=options.model_dump(mode="json"),
         )
-        jobs = self._read_jobs()
-        jobs[job.id] = job
-        self._write_jobs(jobs)
+        with json_file_lock(self.jobs_path):
+            jobs = self._read_jobs_unlocked()
+            jobs[job.id] = job
+            self._write_jobs_unlocked(jobs)
         return job
 
     def process_job(self, job_id: str) -> ProcessingJob:
-        jobs = self._read_jobs()
-        job = jobs[job_id]
-        if job.status in TERMINAL_PROCESSING_STATUSES:
-            return job
+        with json_file_lock(self.jobs_path):
+            jobs = self._read_jobs_unlocked()
+            job = jobs[job_id]
+            if job.status in TERMINAL_PROCESSING_STATUSES:
+                return job
 
-        job.status = ProcessingJobStatus.RUNNING
-        job.started_at = utc_now()
-        job.progress_message = "Breaking down video media"
-        job.derived_media_items = []
-        job.errors = []
-        jobs[job.id] = job
-        self._write_jobs(jobs)
+            job.status = ProcessingJobStatus.RUNNING
+            job.started_at = utc_now()
+            job.progress_message = "Breaking down video media"
+            job.derived_media_items = []
+            job.errors = []
+            jobs[job.id] = job
+            self._write_jobs(jobs)
 
         processing_state = {"manifest_appended": False}
         try:
@@ -82,8 +85,7 @@ class ProcessingService:
             )
             job.progress_message = "Video breakdown completed with errors"
             job.completed_at = utc_now()
-            jobs[job.id] = job
-            self._write_jobs(jobs)
+            self._save_job(job)
             return job
 
     def _process_running_job(
@@ -101,8 +103,7 @@ class ProcessingService:
                 }
             )
             job.completed_at = utc_now()
-            jobs[job.id] = job
-            self._write_jobs(jobs)
+            self._save_job(job)
             return job
 
         vault = VaultService(self.vault_root)
@@ -130,8 +131,7 @@ class ProcessingService:
             job.status = ProcessingJobStatus.FAILED
             job.progress_message = "Video breakdown completed with errors"
             job.completed_at = utc_now()
-            jobs[job.id] = job
-            self._write_jobs(jobs)
+            self._save_job(job)
             return job
 
         for media_item_id in job.source_media_item_ids:
@@ -186,8 +186,7 @@ class ProcessingService:
             else "Video breakdown completed with errors"
         )
         job.completed_at = utc_now()
-        jobs[job.id] = job
-        self._write_jobs(jobs)
+        self._save_job(job)
         return job
 
     def list_jobs(self) -> list[ProcessingJob]:
@@ -199,6 +198,12 @@ class ProcessingService:
 
     def get_job(self, job_id: str) -> ProcessingJob | None:
         return self._read_jobs().get(job_id)
+
+    def _save_job(self, job: ProcessingJob) -> None:
+        with json_file_lock(self.jobs_path):
+            jobs = self._read_jobs_unlocked()
+            jobs[job.id] = job
+            self._write_jobs(jobs)
 
     def _delete_derived_files(self, derived_items: list[MediaItem]) -> None:
         for item in derived_items:
@@ -419,6 +424,10 @@ class ProcessingService:
         return derived_items, errors
 
     def _read_jobs(self) -> dict[str, ProcessingJob]:
+        with json_file_lock(self.jobs_path):
+            return self._read_jobs_unlocked()
+
+    def _read_jobs_unlocked(self) -> dict[str, ProcessingJob]:
         if not self.jobs_path.exists():
             return {}
         payload = json.loads(self.jobs_path.read_text(encoding="utf-8"))
@@ -428,16 +437,14 @@ class ProcessingService:
         }
 
     def _write_jobs(self, jobs: dict[str, ProcessingJob]) -> None:
-        self.vault_root.mkdir(parents=True, exist_ok=True)
-        self.jobs_path.write_text(
-            json.dumps(
-                {
-                    job_id: job.model_dump(mode="json")
-                    for job_id, job in jobs.items()
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+        with json_file_lock(self.jobs_path):
+            self._write_jobs_unlocked(jobs)
+
+    def _write_jobs_unlocked(self, jobs: dict[str, ProcessingJob]) -> None:
+        atomic_write_json(
+            self.jobs_path,
+            {
+                job_id: job.model_dump(mode="json")
+                for job_id, job in jobs.items()
+            },
         )

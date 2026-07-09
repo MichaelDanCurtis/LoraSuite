@@ -110,6 +110,7 @@ The API surface is:
 POST /processing/jobs
 GET /processing/jobs
 GET /processing/jobs/{job_id}
+POST /processing/jobs/{job_id}/process
 ```
 
 Example request:
@@ -128,6 +129,8 @@ Example request:
 ```
 
 The current UI uses this processing path for frame extraction and audio extraction. It does not yet caption frames, detect faces, score frame quality, or create trainer-specific packages directly. Those steps belong to the later Identify and Train slices.
+
+Video breakdown requests are capped at 8 FPS and 600 frames per job. The Curate UI reuses matching queued or running breakdown jobs and calls the process endpoint to resume them instead of creating duplicate derivative folders.
 
 ## Instagram Browser Scan
 
