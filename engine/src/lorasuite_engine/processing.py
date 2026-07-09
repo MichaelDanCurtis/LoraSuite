@@ -72,7 +72,7 @@ class ProcessingService:
             return self._process_running_job(jobs, job, processing_state)
         except Exception as exc:
             if not processing_state["manifest_appended"]:
-                self._delete_job_derivatives(job.id)
+                self._delete_unmanifested_job_derivatives(job.id)
             job.status = ProcessingJobStatus.FAILED
             job.errors.append(
                 {
@@ -227,11 +227,27 @@ class ProcessingService:
 
         return resolved_items, items_to_append
 
-    def _delete_job_derivatives(self, job_id: str) -> None:
-        shutil.rmtree(
-            self.derivatives_dir / "video_breakdowns" / job_id,
-            ignore_errors=True,
-        )
+    def _delete_unmanifested_job_derivatives(self, job_id: str) -> None:
+        job_derivatives_dir = self.derivatives_dir / "video_breakdowns" / job_id
+        if not job_derivatives_dir.exists():
+            return
+
+        try:
+            manifest_raw_paths = {
+                Path(item.raw_path)
+                for item in VaultService(self.vault_root).list_media_items()
+            }
+        except Exception:
+            shutil.rmtree(job_derivatives_dir, ignore_errors=True)
+            return
+
+        for path in sorted(job_derivatives_dir.rglob("*"), reverse=True):
+            if path.is_file() and path not in manifest_raw_paths:
+                with suppress(OSError):
+                    path.unlink()
+            elif path.is_dir():
+                with suppress(OSError):
+                    path.rmdir()
 
     def _breakdown_video(
         self,
