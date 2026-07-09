@@ -13,7 +13,8 @@ from lorasuite_engine.instagram_browser import (
     scan_instagram_url_with_browser_cookies,
 )
 from lorasuite_engine.ingress import IngressService
-from lorasuite_engine.models import SourceKind
+from lorasuite_engine.models import SourceKind, VideoBreakdownOptions
+from lorasuite_engine.processing import ProcessingService
 from lorasuite_engine.social_helper import scan_instagram_helper_payload
 from lorasuite_engine.vault import VaultService
 
@@ -53,6 +54,12 @@ class IngressJobRequest(BaseModel):
     options: dict[str, object] = Field(default_factory=dict)
 
 
+class ProcessingJobRequest(BaseModel):
+    job_type: Literal["video_breakdown"]
+    source_media_item_ids: list[str]
+    options: VideoBreakdownOptions = Field(default_factory=VideoBreakdownOptions)
+
+
 def default_vault_root() -> Path:
     configured_root = os.environ.get("LORASUITE_VAULT_ROOT")
     if configured_root:
@@ -78,6 +85,9 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
 
     def ingress_service() -> IngressService:
         return IngressService(app.state.vault_root)
+
+    def processing_service() -> ProcessingService:
+        return ProcessingService(app.state.vault_root)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -179,6 +189,30 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
         job = ingress_service().get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Ingress job not found")
+        return job.model_dump(mode="json")
+
+    @app.post("/processing/jobs")
+    def create_processing_job(
+        request: ProcessingJobRequest,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, object]:
+        service = processing_service()
+        job = service.create_video_breakdown_job(
+            source_media_item_ids=request.source_media_item_ids,
+            options=request.options,
+        )
+        background_tasks.add_task(service.process_job, job.id)
+        return job.model_dump(mode="json")
+
+    @app.get("/processing/jobs")
+    def list_processing_jobs() -> list[dict[str, object]]:
+        return [job.model_dump(mode="json") for job in processing_service().list_jobs()]
+
+    @app.get("/processing/jobs/{job_id}")
+    def get_processing_job(job_id: str) -> dict[str, object]:
+        job = processing_service().get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Processing job not found")
         return job.model_dump(mode="json")
 
     return app

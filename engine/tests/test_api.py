@@ -395,3 +395,81 @@ def test_ingress_jobs_endpoint_lists_recent_jobs(client, tmp_path):
 
     assert response.status_code == 200
     assert response.json()[0]["source_kind"] == "local"
+
+
+def test_create_processing_job_queues_video_breakdown(client, monkeypatch):
+    scheduled_tasks = []
+
+    def capture_task(self, func, *args, **kwargs):
+        scheduled_tasks.append((func, args, kwargs))
+
+    monkeypatch.setattr(api_module.BackgroundTasks, "add_task", capture_task)
+
+    response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": ["media_video_1"],
+            "options": {
+                "generate_frames": True,
+                "extract_audio": True,
+                "frames_per_second": 1,
+                "max_frame_count": 2,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_type"] == "video_breakdown"
+    assert payload["status"] == "queued"
+    assert payload["source_media_item_ids"] == ["media_video_1"]
+    assert payload["options"]["max_frame_count"] == 2
+    assert len(scheduled_tasks) == 1
+    scheduled_func, scheduled_args, scheduled_kwargs = scheduled_tasks[0]
+    assert scheduled_func.__name__ == "process_job"
+    assert scheduled_args == (payload["id"],)
+    assert scheduled_kwargs == {}
+
+
+def test_processing_job_detail_returns_404_for_missing_job(client):
+    response = client.get("/processing/jobs/missing_job")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Processing job not found"
+
+
+def test_processing_jobs_endpoint_lists_created_jobs(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module.BackgroundTasks,
+        "add_task",
+        lambda self, func, *args, **kwargs: None,
+    )
+    first_response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": ["media_video_1"],
+            "options": {"max_frame_count": 2},
+        },
+    )
+    second_response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": ["media_video_2"],
+            "options": {"max_frame_count": 3},
+        },
+    )
+
+    response = client.get("/processing/jobs")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert response.status_code == 200
+    listed_jobs = response.json()
+    assert [job["id"] for job in listed_jobs] == [
+        second_response.json()["id"],
+        first_response.json()["id"],
+    ]
+    assert listed_jobs[0]["job_type"] == "video_breakdown"
