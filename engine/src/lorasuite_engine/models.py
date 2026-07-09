@@ -62,6 +62,31 @@ class AssetType(StrEnum):
     MASK = "mask"
 
 
+class AssetRole(StrEnum):
+    SOURCE = "source"
+    DERIVATIVE = "derivative"
+
+
+class DerivativeType(StrEnum):
+    POSTER = "poster"
+    THUMBNAIL = "thumbnail"
+    VIDEO_FRAME = "video_frame"
+    VIDEO_CLIP = "video_clip"
+    AUDIO_CLIP = "audio_clip"
+    TRANSCRIPT = "transcript"
+    CAPTION = "caption"
+    FACE_CROP = "face_crop"
+    PERSON_CROP = "person_crop"
+
+
+class ProcessingJobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
 class ExportType(StrEnum):
     RUNCOMFY_IMAGE = "runcomfy_image"
     AI_TOOLKIT_VIDEO = "ai_toolkit_video"
@@ -144,6 +169,36 @@ class IngressJob(BaseModel):
         if self.candidate_count == 0 and self.candidate_ids:
             self.candidate_count = len(self.candidate_ids)
         return self
+
+
+class VideoBreakdownOptions(BaseModel):
+    generate_frames: bool = True
+    extract_audio: bool = True
+    frames_per_second: int = 1
+    max_frame_count: int = 6
+
+    @field_validator("frames_per_second", "max_frame_count")
+    @classmethod
+    def positive_integer(cls, value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("value must be an integer")
+        if value <= 0:
+            raise ValueError("value must be greater than zero")
+        return value
+
+
+class ProcessingJob(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("processing_job"))
+    job_type: str
+    source_media_item_ids: list[str] = Field(default_factory=list)
+    status: ProcessingJobStatus = ProcessingJobStatus.QUEUED
+    progress_message: str = "Queued"
+    options: dict[str, Any] = Field(default_factory=dict)
+    derived_media_items: list[MediaItem] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class SegmentCreate(BaseModel):
