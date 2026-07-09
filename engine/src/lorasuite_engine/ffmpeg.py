@@ -32,8 +32,8 @@ def _validate_frames_per_second(frames_per_second: int) -> int:
 @dataclass(frozen=True)
 class VideoMetadata:
     duration_seconds: float
-    width: int | None
-    height: int | None
+    width: int
+    height: int
     fps: float | None
 
 
@@ -66,11 +66,9 @@ def _parse_fraction(value: str | None) -> float | None:
     return parsed if isfinite(parsed) and parsed > 0 else None
 
 
-def _optional_int_metadata(value: object, field_name: str) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer or null")
+def _positive_int_metadata(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
     return value
 
 
@@ -106,11 +104,13 @@ def probe_video(video_path: Path) -> VideoMetadata:
         duration = float(format_metadata["duration"])
         if not isfinite(duration) or duration < 0:
             raise ValueError("duration must be finite and non-negative")
-        width = _optional_int_metadata(stream.get("width"), "width")
-        height = _optional_int_metadata(stream.get("height"), "height")
-        raw_fps = stream.get("avg_frame_rate")
-        if raw_fps is not None and not isinstance(raw_fps, str):
-            raise ValueError("avg_frame_rate must be a string or null")
+        width = _positive_int_metadata(stream.get("width"), "width")
+        height = _positive_int_metadata(stream.get("height"), "height")
+        if "avg_frame_rate" not in stream:
+            raise ValueError("avg_frame_rate is required")
+        raw_fps = stream["avg_frame_rate"]
+        if not isinstance(raw_fps, str):
+            raise ValueError("avg_frame_rate must be a string")
         fps = _parse_fraction(raw_fps)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise RuntimeError(f"ffprobe returned invalid metadata for {video_path}: {exc}") from exc

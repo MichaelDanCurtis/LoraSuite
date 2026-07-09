@@ -233,6 +233,48 @@ def test_failed_ffmpeg_run_does_not_leave_public_output_frames(tmp_path: Path, m
                 "format": {},
             }
         ),
+        json.dumps(
+            {
+                "streams": [{"height": 24, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 0, "height": 24, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 0, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": -1, "height": 24, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": -1, "avg_frame_rate": "1/1"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24}],
+                "format": {"duration": "1"},
+            }
+        ),
     ],
 )
 def test_probe_video_raises_runtime_error_for_invalid_metadata(
@@ -248,6 +290,33 @@ def test_probe_video_raises_runtime_error_for_invalid_metadata(
     monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="ffprobe returned invalid metadata"):
+        probe_video(tmp_path / "source.mp4")
+
+
+def test_probe_video_raises_runtime_error_when_ffprobe_is_missing(tmp_path: Path, monkeypatch):
+    def fake_run(command, **kwargs):
+        assert command[0] == "ffprobe"
+        assert kwargs["shell"] is False
+        raise FileNotFoundError
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="ffprobe executable was not found"):
+        probe_video(tmp_path / "source.mp4")
+
+
+def test_probe_video_raises_runtime_error_with_ffprobe_stderr(tmp_path: Path, monkeypatch):
+    def fake_run(command, **kwargs):
+        assert command[0] == "ffprobe"
+        assert kwargs["shell"] is False
+        return SimpleNamespace(returncode=1, stderr="probe failed\nbad stream\n")
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        RuntimeError,
+        match="ffprobe failed with exit code 1: probe failed bad stream",
+    ):
         probe_video(tmp_path / "source.mp4")
 
 
