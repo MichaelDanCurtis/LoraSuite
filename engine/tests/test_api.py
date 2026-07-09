@@ -432,6 +432,29 @@ def test_create_processing_job_queues_video_breakdown(client, monkeypatch):
     assert scheduled_kwargs == {}
 
 
+def test_create_processing_job_rejects_empty_source_media_item_ids(
+    client, monkeypatch
+):
+    scheduled_tasks = []
+
+    def capture_task(self, func, *args, **kwargs):
+        scheduled_tasks.append((func, args, kwargs))
+
+    monkeypatch.setattr(api_module.BackgroundTasks, "add_task", capture_task)
+
+    response = client.post(
+        "/processing/jobs",
+        json={
+            "job_type": "video_breakdown",
+            "source_media_item_ids": [],
+            "options": {"max_frame_count": 2},
+        },
+    )
+
+    assert response.status_code == 422
+    assert scheduled_tasks == []
+
+
 def test_processing_job_detail_returns_404_for_missing_job(client):
     response = client.get("/processing/jobs/missing_job")
 

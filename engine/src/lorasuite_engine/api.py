@@ -56,7 +56,7 @@ class IngressJobRequest(BaseModel):
 
 class ProcessingJobRequest(BaseModel):
     job_type: Literal["video_breakdown"]
-    source_media_item_ids: list[str]
+    source_media_item_ids: list[str] = Field(min_length=1)
     options: VideoBreakdownOptions = Field(default_factory=VideoBreakdownOptions)
 
 
