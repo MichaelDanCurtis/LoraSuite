@@ -248,15 +248,76 @@ describe("CurateSearchTab", () => {
     expect(engine.getProcessingJob).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1000);
     });
     expect(engine.getProcessingJob).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
     });
     expect(engine.getProcessingJob).toHaveBeenCalledTimes(3);
+    expect(onMediaItemsGenerated).toHaveBeenCalledWith(generatedItems);
+    expect(screen.getByText("Generated 1 derivative media item.")).toBeInTheDocument();
+  });
+
+  it("keeps polling video breakdown jobs beyond the first few queued checks", async () => {
+    vi.useFakeTimers();
+    const generatedItems: MediaItem[] = [
+      {
+        id: "media_frame_delayed",
+        raw_path: "/tmp/vault/derived/video/frame-delayed.png",
+        media_type: "image",
+        width: 1920,
+        height: 1080,
+        status: "new",
+      },
+    ];
+    const getProcessingJob = vi.fn();
+    for (let index = 0; index < 6; index += 1) {
+      getProcessingJob.mockResolvedValueOnce(
+        processingJob({
+          status: index % 2 === 0 ? "queued" : "running",
+          progress_message: "Still processing",
+        }),
+      );
+    }
+    getProcessingJob.mockResolvedValueOnce(
+      processingJob({
+        status: "complete",
+        progress_message: "Generated derivatives",
+        derived_media_items: generatedItems,
+      }),
+    );
+    const engine = engineStub({
+      createProcessingJob: vi.fn().mockResolvedValue(processingJob({ status: "queued" })),
+      getProcessingJob,
+    });
+    const onMediaItemsGenerated = vi.fn();
+
+    render(
+      <CurateSearchTab
+        mediaItems={mediaItems}
+        engine={engine}
+        onSendToIdentify={vi.fn()}
+        onMediaItemsGenerated={onMediaItemsGenerated}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Select for Breakdown: video.mp4"));
+    fireEvent.click(screen.getByRole("button", { name: "Break Down Selected Videos" }));
+
+    await act(flushPromises);
+    expect(getProcessingJob).toHaveBeenCalledTimes(1);
+
+    for (let index = 0; index < 6; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+        await flushPromises();
+      });
+    }
+
+    expect(getProcessingJob).toHaveBeenCalledTimes(7);
     expect(onMediaItemsGenerated).toHaveBeenCalledWith(generatedItems);
     expect(screen.getByText("Generated 1 derivative media item.")).toBeInTheDocument();
   });

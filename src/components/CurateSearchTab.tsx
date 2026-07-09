@@ -12,8 +12,8 @@ interface CurateSearchTabProps {
 }
 
 type MediaTypeFilter = "all" | MediaType;
-const PROCESSING_JOB_POLL_DELAY_MS = 500;
-const PROCESSING_JOB_MAX_DETAIL_ATTEMPTS = 5;
+const PROCESSING_JOB_POLL_DELAY_MS = 1000;
+const PROCESSING_JOB_MAX_DETAIL_ATTEMPTS = 600;
 const terminalProcessingStatuses = new Set<ProcessingJobStatus>(["complete", "failed", "canceled"]);
 
 export function CurateSearchTab({

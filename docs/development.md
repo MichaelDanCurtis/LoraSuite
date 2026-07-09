@@ -67,11 +67,12 @@ cargo check --manifest-path src-tauri/Cargo.toml
 3. Review candidates in **Tile**, **List**, or **Gallery** mode.
 4. Confirm selected candidates to import them into the vault.
 5. Watch the ingress job table for completion.
-6. Open **Video Review** and select segment intent flags.
-7. Extract frames through the engine tests or direct API.
-8. Open **Exports**.
-9. Paste frame paths and choose an output folder.
-10. Create the RunComfy AI Toolkit image export.
+6. Open **Curate**.
+7. Send selected image candidates to **Identify**.
+8. Select imported videos for breakdown to generate frame and voice derivatives.
+9. Open **Train**.
+10. Paste frame paths and choose an output folder.
+11. Create the RunComfy AI Toolkit image export.
 
 ## Local Ingress Review
 
@@ -87,6 +88,46 @@ The **Data Ingress** tab uses scan -> review -> confirm.
 8. Completed imports are added to the app's media list for **Curate / Search**.
 
 The first scan does not copy raw media into the vault. It creates reviewable candidates and lightweight previews. Confirming selected candidates creates an ingress job that copies selected ready local candidates and downloads selected social originals when a direct media URL is available.
+
+## Video Breakdown Processing
+
+The first processing slice is trainer-neutral. It creates derivatives from imported vault videos and writes those derivatives back as normal `MediaItem` records.
+
+1. Import or confirm-ingest a video so it appears in **Curate**.
+2. Select the video's **Breakdown** checkbox.
+3. Click **Break Down Selected Videos**.
+4. The frontend creates a `/processing/jobs` video breakdown job.
+5. The engine extracts frame images and a WAV voice clip through FFmpeg.
+6. Generated derivatives are appended to the vault manifest and returned to **Curate**.
+
+The processing service stores job state in `processing_jobs.json` under the vault root. Video derivatives are written under `derivatives/video_breakdowns/<job_id>/<source_media_item_id>/`, then appended to the vault manifest with derivative metadata such as `asset_role`, `derivative_type`, `source_media_item_id`, `time_range`, and generator settings.
+
+Retries are manifest-aware. If a stale running job is processed again, existing manifest-backed derivative paths are reused instead of duplicated or overwritten. Failed attempts clean up only unmanifested outputs; if manifest state cannot be read, cleanup leaves files in place rather than risking data loss.
+
+The API surface is:
+
+```http
+POST /processing/jobs
+GET /processing/jobs
+GET /processing/jobs/{job_id}
+```
+
+Example request:
+
+```json
+{
+  "job_type": "video_breakdown",
+  "source_media_item_ids": ["media_video_1"],
+  "options": {
+    "generate_frames": true,
+    "extract_audio": true,
+    "frames_per_second": 1,
+    "max_frame_count": 6
+  }
+}
+```
+
+The current UI uses this processing path for frame extraction and audio extraction. It does not yet caption frames, detect faces, score frame quality, or create trainer-specific packages directly. Those steps belong to the later Identify and Train slices.
 
 ## Instagram Browser Scan
 
@@ -143,11 +184,11 @@ If a helper video candidate is selected before a direct original URL exists, the
 
 The engine still exposes `/vault/import/local` for direct tests and compatibility, but the product UI should use the ingress scan/job flow.
 
-## Video and Export Workflow
+## Train and Export Workflow
 
-1. Open **Video Review** and select segment intent flags.
-2. Extract frames through the engine tests or direct API.
-3. Open **Exports**.
+1. Use **Curate** to select image candidates and generated video frames.
+2. Use **Identify** to assemble target identity candidates.
+3. Open **Train**.
 4. Paste frame paths and choose an output folder.
 5. Create the RunComfy AI Toolkit image export.
 
