@@ -112,6 +112,8 @@ def probe_video(video_path: Path) -> VideoMetadata:
         if not isinstance(raw_fps, str):
             raise ValueError("avg_frame_rate must be a string")
         fps = _parse_fraction(raw_fps)
+        if fps is None:
+            raise ValueError("avg_frame_rate must parse to a positive finite value")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise RuntimeError(f"ffprobe returned invalid metadata for {video_path}: {exc}") from exc
     return VideoMetadata(

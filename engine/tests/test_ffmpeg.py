@@ -208,6 +208,18 @@ def test_failed_ffmpeg_run_does_not_leave_public_output_frames(tmp_path: Path, m
         '{"streams": [{"width": 40, "height": 24, "avg_frame_rate": "N/A"}], "format": {"duration": "N/A"}}',
         json.dumps(
             {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": "N/A"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": "0/0"}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
                 "streams": [{"width": 40, "height": 24, "avg_frame_rate": 1}],
                 "format": {"duration": "1"},
             }
