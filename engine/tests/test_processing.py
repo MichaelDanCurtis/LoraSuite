@@ -3,11 +3,13 @@ import shutil
 import subprocess
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 from pydantic import ValidationError
 
+import lorasuite_engine.processing as processing_module
 from lorasuite_engine.models import (
     AssetRole,
     DerivativeType,
@@ -23,8 +25,8 @@ from lorasuite_engine.vault import VaultService
 
 
 ffmpeg = pytest.mark.skipif(
-    shutil.which("ffmpeg") is None,
-    reason="FFmpeg is not installed",
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="FFmpeg and FFprobe are required",
 )
 
 
@@ -55,6 +57,18 @@ def create_test_video(path: Path, *, duration_seconds: int = 2, rate: int = 4) -
         text=True,
     )
     return path
+
+
+def create_fake_vault_video(vault: VaultService, path: Path) -> MediaItem:
+    path.write_bytes(b"fake video bytes")
+    media_item = MediaItem(
+        source_id="source_1",
+        raw_path=path,
+        media_type=MediaType.VIDEO,
+        sha256=sha256(path.read_bytes()).hexdigest(),
+    )
+    vault.append_media_items([media_item])
+    return media_item
 
 
 def test_processing_job_serializes_derivative_outputs():
@@ -245,6 +259,123 @@ def test_video_breakdown_reprocessing_same_source_uses_disjoint_derivative_paths
     assert first_paths
     assert second_paths
     assert first_paths.isdisjoint(second_paths)
+
+
+def test_video_breakdown_deletes_unmanifested_overproduced_frames(tmp_path, monkeypatch):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def overproduce_frames(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame_paths = []
+        for index in range(1, 5):
+            frame_path = output_dir / f"frame_{index:05d}.png"
+            Image.new("RGB", (16, 16), color=(index * 20, 10, 40)).save(frame_path)
+            frame_paths.append(frame_path)
+        return frame_paths
+
+    monkeypatch.setattr(processing_module, "extract_frames", overproduce_frames)
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(
+            extract_audio=False,
+            frames_per_second=4,
+            max_frame_count=2,
+        ),
+    )
+    completed = service.process_job(job.id)
+
+    frame_paths = [
+        item.raw_path
+        for item in completed.derived_media_items
+        if item.metadata_json["derivative_type"] == DerivativeType.VIDEO_FRAME
+    ]
+    assert completed.status == ProcessingJobStatus.COMPLETE
+    assert len(frame_paths) == 2
+    assert len(list(frame_paths[0].parent.glob("frame_*.png"))) == len(frame_paths)
+
+
+@ffmpeg
+def test_process_job_returns_terminal_job_without_duplicate_manifest_rows(tmp_path):
+    source_video = create_test_video(tmp_path / "source.mp4")
+    vault = VaultService(tmp_path / "vault")
+    source_item = vault.import_local_paths([source_video]).media_items[0]
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+
+    first_completed = service.process_job(job.id)
+    manifest_count_after_first_run = len(vault.list_media_items())
+    second_completed = service.process_job(job.id)
+
+    assert first_completed.status == ProcessingJobStatus.COMPLETE
+    assert second_completed == first_completed
+    assert len(vault.list_media_items()) == manifest_count_after_first_run
+    assert [item.id for item in second_completed.derived_media_items] == [
+        item.id for item in first_completed.derived_media_items
+    ]
+
+
+def test_video_breakdown_persists_failed_job_for_unexpected_processing_error(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def extract_single_frame(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = output_dir / "frame_00001.png"
+        Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+        return [frame_path]
+
+    monkeypatch.setattr(processing_module, "extract_frames", extract_single_frame)
+
+    def fail_append_media_items(self: VaultService, media_items: list[MediaItem]) -> None:
+        raise OSError("manifest write failed")
+
+    monkeypatch.setattr(VaultService, "append_media_items", fail_append_media_items)
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=1),
+    )
+    completed = service.process_job(job.id)
+    persisted = service.get_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[-1]["code"] == "processing_failed"
+    assert "manifest write failed" in completed.errors[-1]["message"]
+    assert persisted == completed
 
 
 def test_video_breakdown_fails_for_missing_source_media(tmp_path):

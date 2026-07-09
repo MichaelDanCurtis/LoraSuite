@@ -45,12 +45,36 @@ class ProcessingService:
     def process_job(self, job_id: str) -> ProcessingJob:
         jobs = self._read_jobs()
         job = jobs[job_id]
+        if job.status != ProcessingJobStatus.QUEUED:
+            return job
+
         job.status = ProcessingJobStatus.RUNNING
         job.started_at = utc_now()
         job.progress_message = "Breaking down video media"
         jobs[job.id] = job
         self._write_jobs(jobs)
 
+        try:
+            return self._process_running_job(jobs, job)
+        except Exception as exc:
+            job.status = ProcessingJobStatus.FAILED
+            job.errors.append(
+                {
+                    "code": "processing_failed",
+                    "message": str(exc) or exc.__class__.__name__,
+                }
+            )
+            job.progress_message = "Video breakdown completed with errors"
+            job.completed_at = utc_now()
+            jobs[job.id] = job
+            self._write_jobs(jobs)
+            return job
+
+    def _process_running_job(
+        self,
+        jobs: dict[str, ProcessingJob],
+        job: ProcessingJob,
+    ) -> ProcessingJob:
         if job.job_type != "video_breakdown":
             job.status = ProcessingJobStatus.FAILED
             job.errors.append(
@@ -194,7 +218,11 @@ class ProcessingService:
                     }
                 )
             else:
-                for index, frame_path in enumerate(frames[: options.max_frame_count]):
+                manifested_frames = frames[: options.max_frame_count]
+                for discarded_frame in frames[options.max_frame_count :]:
+                    discarded_frame.unlink(missing_ok=True)
+
+                for index, frame_path in enumerate(manifested_frames):
                     derived_items.append(
                         vault.build_derivative_media_item(
                             source_item=source_item,
