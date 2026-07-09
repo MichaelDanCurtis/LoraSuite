@@ -1,0 +1,239 @@
+import json
+from pathlib import Path
+
+from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
+from lorasuite_engine.models import (
+    DerivativeType,
+    MediaItem,
+    MediaType,
+    ProcessingJob,
+    ProcessingJobStatus,
+    VideoBreakdownOptions,
+    utc_now,
+)
+from lorasuite_engine.vault import VaultService
+
+
+class ProcessingService:
+    def __init__(self, vault_root: Path):
+        self.vault_root = Path(vault_root)
+
+    @property
+    def jobs_path(self) -> Path:
+        return self.vault_root / "processing_jobs.json"
+
+    @property
+    def derivatives_dir(self) -> Path:
+        return self.vault_root / "derivatives"
+
+    def create_video_breakdown_job(
+        self,
+        *,
+        source_media_item_ids: list[str],
+        options: VideoBreakdownOptions,
+    ) -> ProcessingJob:
+        job = ProcessingJob(
+            job_type="video_breakdown",
+            source_media_item_ids=source_media_item_ids,
+            options=options.model_dump(mode="json"),
+        )
+        jobs = self._read_jobs()
+        jobs[job.id] = job
+        self._write_jobs(jobs)
+        return job
+
+    def process_job(self, job_id: str) -> ProcessingJob:
+        jobs = self._read_jobs()
+        job = jobs[job_id]
+        job.status = ProcessingJobStatus.RUNNING
+        job.started_at = utc_now()
+        job.progress_message = "Breaking down video media"
+        jobs[job.id] = job
+        self._write_jobs(jobs)
+
+        if job.job_type != "video_breakdown":
+            job.status = ProcessingJobStatus.FAILED
+            job.errors.append(
+                {
+                    "code": "unsupported_processing_job",
+                    "message": f"unsupported processing job type: {job.job_type}",
+                }
+            )
+            job.completed_at = utc_now()
+            jobs[job.id] = job
+            self._write_jobs(jobs)
+            return job
+
+        vault = VaultService(self.vault_root)
+        options = VideoBreakdownOptions.model_validate(job.options)
+        derived_items: list[MediaItem] = []
+
+        for media_item_id in job.source_media_item_ids:
+            source_item = vault.get_media_item(media_item_id)
+            if source_item is None:
+                job.errors.append(
+                    {
+                        "code": "missing_source_media",
+                        "message": f"source media item not found: {media_item_id}",
+                    }
+                )
+                continue
+            if source_item.media_type != MediaType.VIDEO:
+                job.errors.append(
+                    {
+                        "code": "unsupported_media_type",
+                        "message": f"source media item is not video: {media_item_id}",
+                    }
+                )
+                continue
+            breakdown_items, breakdown_errors = self._breakdown_video(
+                vault,
+                source_item,
+                options,
+            )
+            derived_items.extend(breakdown_items)
+            job.errors.extend(breakdown_errors)
+
+        if derived_items:
+            vault.append_media_items(derived_items)
+        job.derived_media_items = derived_items
+        job.status = (
+            ProcessingJobStatus.COMPLETE
+            if derived_items and not job.errors
+            else ProcessingJobStatus.FAILED
+        )
+        job.progress_message = (
+            "Video breakdown complete"
+            if job.status == ProcessingJobStatus.COMPLETE
+            else "Video breakdown completed with errors"
+        )
+        job.completed_at = utc_now()
+        jobs[job.id] = job
+        self._write_jobs(jobs)
+        return job
+
+    def list_jobs(self) -> list[ProcessingJob]:
+        return sorted(
+            self._read_jobs().values(),
+            key=lambda job: job.created_at,
+            reverse=True,
+        )
+
+    def get_job(self, job_id: str) -> ProcessingJob | None:
+        return self._read_jobs().get(job_id)
+
+    def _breakdown_video(
+        self,
+        vault: VaultService,
+        source_item: MediaItem,
+        options: VideoBreakdownOptions,
+    ) -> tuple[list[MediaItem], list[dict[str, str]]]:
+        derived_items: list[MediaItem] = []
+        errors: list[dict[str, str]] = []
+
+        try:
+            metadata = probe_video(source_item.raw_path)
+        except RuntimeError as exc:
+            return [], [
+                {
+                    "code": "video_probe_failed",
+                    "message": str(exc),
+                }
+            ]
+
+        end_seconds = max(0.1, min(metadata.duration_seconds, options.max_frame_count))
+
+        if options.generate_frames:
+            frames_dir = self.derivatives_dir / "frames" / source_item.id
+            try:
+                frames = extract_frames(
+                    video_path=source_item.raw_path,
+                    output_dir=frames_dir,
+                    start_seconds=0.0,
+                    end_seconds=end_seconds,
+                    frames_per_second=options.frames_per_second,
+                )[: options.max_frame_count]
+            except (RuntimeError, ValueError) as exc:
+                errors.append(
+                    {
+                        "code": "frame_extraction_failed",
+                        "message": str(exc),
+                    }
+                )
+            else:
+                for index, frame_path in enumerate(frames):
+                    derived_items.append(
+                        vault.build_derivative_media_item(
+                            source_item=source_item,
+                            derivative_path=frame_path,
+                            media_type=MediaType.IMAGE,
+                            derivative_type=DerivativeType.VIDEO_FRAME,
+                            metadata={
+                                "time_range": {
+                                    "start_seconds": index / options.frames_per_second,
+                                    "end_seconds": index / options.frames_per_second,
+                                },
+                                "generator": {
+                                    "name": "ffmpeg",
+                                    "settings": options.model_dump(mode="json"),
+                                },
+                            },
+                        )
+                    )
+
+        if options.extract_audio:
+            audio_path = self.derivatives_dir / "audio" / source_item.id / "audio.wav"
+            try:
+                extract_audio(video_path=source_item.raw_path, output_path=audio_path)
+            except RuntimeError as exc:
+                errors.append(
+                    {
+                        "code": "audio_extraction_failed",
+                        "message": str(exc),
+                    }
+                )
+            else:
+                derived_items.append(
+                    vault.build_derivative_media_item(
+                        source_item=source_item,
+                        derivative_path=audio_path,
+                        media_type=MediaType.AUDIO,
+                        derivative_type=DerivativeType.AUDIO_CLIP,
+                        metadata={
+                            "time_range": {
+                                "start_seconds": 0.0,
+                                "end_seconds": metadata.duration_seconds,
+                            },
+                            "generator": {
+                                "name": "ffmpeg",
+                                "settings": {"extract_audio": True},
+                            },
+                        },
+                    )
+                )
+
+        return derived_items, errors
+
+    def _read_jobs(self) -> dict[str, ProcessingJob]:
+        if not self.jobs_path.exists():
+            return {}
+        payload = json.loads(self.jobs_path.read_text(encoding="utf-8"))
+        return {
+            job_id: ProcessingJob.model_validate(job_payload)
+            for job_id, job_payload in payload.items()
+        }
+
+    def _write_jobs(self, jobs: dict[str, ProcessingJob]) -> None:
+        self.vault_root.mkdir(parents=True, exist_ok=True)
+        self.jobs_path.write_text(
+            json.dumps(
+                {
+                    job_id: job.model_dump(mode="json")
+                    for job_id, job in jobs.items()
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )

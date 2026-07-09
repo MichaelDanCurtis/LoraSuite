@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -16,7 +18,14 @@ from lorasuite_engine.models import (
     SourceKind,
     VideoBreakdownOptions,
 )
+from lorasuite_engine.processing import ProcessingService
 from lorasuite_engine.vault import VaultService
+
+
+ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="FFmpeg is not installed",
+)
 
 
 def test_processing_job_serializes_derivative_outputs():
@@ -119,3 +128,66 @@ def test_vault_appends_derivative_media_items_without_new_source(tmp_path):
         "start_seconds": 0.0,
         "end_seconds": 0.0,
     }
+
+
+@ffmpeg
+def test_video_breakdown_generates_frame_and_audio_derivatives(tmp_path):
+    source_video = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=32x32:rate=4:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            str(source_video),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    vault = VaultService(tmp_path / "vault")
+    source_item = vault.import_local_paths([source_video]).media_items[0]
+    service = ProcessingService(tmp_path / "vault")
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(max_frame_count=2),
+    )
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.COMPLETE
+    assert completed.derived_media_items
+    derivative_types = {
+        item.metadata_json["derivative_type"]
+        for item in completed.derived_media_items
+    }
+    assert DerivativeType.VIDEO_FRAME in derivative_types
+    assert DerivativeType.AUDIO_CLIP in derivative_types
+    assert all(item.raw_path.exists() for item in completed.derived_media_items)
+    assert len(vault.list_media_items()) == 1 + len(completed.derived_media_items)
+
+
+def test_video_breakdown_fails_for_missing_source_media(tmp_path):
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=["missing_media"],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[0]["code"] == "missing_source_media"
