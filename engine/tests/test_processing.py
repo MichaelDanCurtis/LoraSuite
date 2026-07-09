@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -97,8 +98,10 @@ def test_vault_appends_derivative_media_items_without_new_source(tmp_path):
     )
 
     vault.append_media_items([derivative])
+    manifest = json.loads(vault.manifest_path.read_text(encoding="utf-8"))
     all_items = vault.list_media_items()
 
     assert len(all_items) == 2
+    assert len(manifest["sources"]) == 1
     assert all_items[1].metadata_json["asset_role"] == AssetRole.DERIVATIVE
     assert all_items[1].metadata_json["source_media_item_id"] == source_item.id
