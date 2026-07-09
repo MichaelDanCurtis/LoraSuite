@@ -437,6 +437,82 @@ def test_running_retry_reuses_manifested_derivatives_for_same_raw_paths(
     ]
 
 
+def test_running_retry_does_not_overwrite_manifested_frame_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=1),
+    )
+    frame_path = (
+        tmp_path
+        / "vault"
+        / "derivatives"
+        / "video_breakdowns"
+        / job.id
+        / source_item.id
+        / "frames"
+        / "frame_00001.png"
+    )
+    frame_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+    original_frame_bytes = frame_path.read_bytes()
+    original_frame_sha256 = sha256(original_frame_bytes).hexdigest()
+    existing_derivative = vault.build_derivative_media_item(
+        source_item=source_item,
+        derivative_path=frame_path,
+        media_type=MediaType.IMAGE,
+        derivative_type=DerivativeType.VIDEO_FRAME,
+        metadata={
+            "time_range": {"start_seconds": 0.0, "end_seconds": 0.0},
+            "generator": {"name": "ffmpeg", "settings": {"extract_audio": False}},
+        },
+    )
+    vault.append_media_items([existing_derivative])
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def overwrite_existing_frame(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        generated_frame = output_dir / "frame_00001.png"
+        Image.new("RGB", (16, 16), color=(200, 10, 40)).save(generated_frame)
+        return [generated_frame]
+
+    monkeypatch.setattr(processing_module, "extract_frames", overwrite_existing_frame)
+
+    jobs = service._read_jobs()
+    jobs[job.id].status = ProcessingJobStatus.RUNNING
+    jobs[job.id].derived_media_items = []
+    jobs[job.id].progress_message = "Breaking down video media"
+    service._write_jobs(jobs)
+
+    completed = service.process_job(job.id)
+    manifest_item = vault.get_media_item(existing_derivative.id)
+
+    assert completed.status == ProcessingJobStatus.COMPLETE
+    assert frame_path.read_bytes() == original_frame_bytes
+    assert sha256(frame_path.read_bytes()).hexdigest() == original_frame_sha256
+    assert manifest_item is not None
+    assert manifest_item.sha256 == original_frame_sha256
+    assert [item.id for item in completed.derived_media_items] == [
+        existing_derivative.id
+    ]
+
+
 def test_running_retry_append_failure_keeps_existing_manifested_files(
     tmp_path,
     monkeypatch,
@@ -519,6 +595,51 @@ def test_running_retry_append_failure_keeps_existing_manifested_files(
     assert len(vault.list_media_items()) == manifest_count_after_previous_attempt
     assert existing_frame_path.exists()
     assert not new_frame_path.exists()
+
+
+def test_cleanup_keeps_manifested_files_when_manifest_read_fails(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=1),
+    )
+    frame_path = (
+        tmp_path
+        / "vault"
+        / "derivatives"
+        / "video_breakdowns"
+        / job.id
+        / source_item.id
+        / "frames"
+        / "frame_00001.png"
+    )
+    frame_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+    existing_derivative = vault.build_derivative_media_item(
+        source_item=source_item,
+        derivative_path=frame_path,
+        media_type=MediaType.IMAGE,
+        derivative_type=DerivativeType.VIDEO_FRAME,
+        metadata={
+            "time_range": {"start_seconds": 0.0, "end_seconds": 0.0},
+            "generator": {"name": "ffmpeg", "settings": {"extract_audio": False}},
+        },
+    )
+    vault.append_media_items([existing_derivative])
+
+    def fail_list_media_items(self: VaultService) -> list[MediaItem]:
+        raise RuntimeError("manifest unavailable")
+
+    monkeypatch.setattr(VaultService, "list_media_items", fail_list_media_items)
+
+    service._delete_unmanifested_job_derivatives(job.id)
+
+    assert frame_path.exists()
 
 
 @ffmpeg

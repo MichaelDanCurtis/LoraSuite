@@ -108,6 +108,7 @@ class ProcessingService:
         vault = VaultService(self.vault_root)
         options = VideoBreakdownOptions.model_validate(job.options)
         derived_items: list[MediaItem] = []
+        manifest_raw_paths = self._manifest_raw_paths(vault)
 
         if not job.source_media_item_ids:
             job.errors.append(
@@ -156,6 +157,7 @@ class ProcessingService:
                 vault,
                 source_item,
                 options,
+                manifest_raw_paths,
             )
             derived_items.extend(breakdown_items)
             job.errors.extend(breakdown_errors)
@@ -227,18 +229,40 @@ class ProcessingService:
 
         return resolved_items, items_to_append
 
+    def _manifest_raw_paths(self, vault: VaultService) -> set[Path]:
+        return {Path(item.raw_path) for item in vault.list_media_items()}
+
+    def _materialize_frame_outputs(
+        self,
+        frame_paths: list[Path],
+        frames_dir: Path,
+        protected_raw_paths: set[Path],
+    ) -> list[Path]:
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        materialized_frames: list[Path] = []
+        for frame_path in frame_paths:
+            final_frame_path = frames_dir / frame_path.name
+            if final_frame_path in protected_raw_paths:
+                if frame_path != final_frame_path:
+                    with suppress(OSError):
+                        frame_path.unlink(missing_ok=True)
+                materialized_frames.append(final_frame_path)
+                continue
+
+            if frame_path != final_frame_path:
+                frame_path.replace(final_frame_path)
+            materialized_frames.append(final_frame_path)
+
+        return materialized_frames
+
     def _delete_unmanifested_job_derivatives(self, job_id: str) -> None:
         job_derivatives_dir = self.derivatives_dir / "video_breakdowns" / job_id
         if not job_derivatives_dir.exists():
             return
 
         try:
-            manifest_raw_paths = {
-                Path(item.raw_path)
-                for item in VaultService(self.vault_root).list_media_items()
-            }
+            manifest_raw_paths = self._manifest_raw_paths(VaultService(self.vault_root))
         except Exception:
-            shutil.rmtree(job_derivatives_dir, ignore_errors=True)
             return
 
         for path in sorted(job_derivatives_dir.rglob("*"), reverse=True):
@@ -255,6 +279,7 @@ class ProcessingService:
         vault: VaultService,
         source_item: MediaItem,
         options: VideoBreakdownOptions,
+        protected_raw_paths: set[Path],
     ) -> tuple[list[MediaItem], list[dict[str, str]]]:
         derived_items: list[MediaItem] = []
         errors: list[dict[str, str]] = []
@@ -280,13 +305,21 @@ class ProcessingService:
                 / source_item.id
                 / "frames"
             )
+            staging_frames_dir = frames_dir / ".staging"
+            shutil.rmtree(staging_frames_dir, ignore_errors=True)
+            frames: list[Path] | None = None
             try:
-                frames = extract_frames(
+                extracted_frames = extract_frames(
                     video_path=source_item.raw_path,
-                    output_dir=frames_dir,
+                    output_dir=staging_frames_dir,
                     start_seconds=0.0,
                     end_seconds=end_seconds,
                     frames_per_second=options.frames_per_second,
+                )
+                frames = self._materialize_frame_outputs(
+                    extracted_frames,
+                    frames_dir,
+                    protected_raw_paths,
                 )
             except (RuntimeError, ValueError) as exc:
                 errors.append(
@@ -295,10 +328,13 @@ class ProcessingService:
                         "message": str(exc),
                     }
                 )
-            else:
+            finally:
+                shutil.rmtree(staging_frames_dir, ignore_errors=True)
+            if frames is not None:
                 manifested_frames = frames[: options.max_frame_count]
                 for discarded_frame in frames[options.max_frame_count :]:
-                    discarded_frame.unlink(missing_ok=True)
+                    if discarded_frame not in protected_raw_paths:
+                        discarded_frame.unlink(missing_ok=True)
 
                 if not manifested_frames:
                     errors.append(
@@ -329,16 +365,28 @@ class ProcessingService:
                     )
 
         if options.extract_audio:
-            audio_path = (
+            audio_dir = (
                 self.derivatives_dir
                 / "video_breakdowns"
                 / job_id
                 / source_item.id
                 / "audio"
-                / "audio.wav"
             )
+            audio_path = audio_dir / "audio.wav"
+            staging_audio_dir = audio_dir / ".staging"
+            staging_audio_path = staging_audio_dir / "audio.wav"
+            shutil.rmtree(staging_audio_dir, ignore_errors=True)
             try:
-                extract_audio(video_path=source_item.raw_path, output_path=audio_path)
+                extract_audio(
+                    video_path=source_item.raw_path,
+                    output_path=staging_audio_path,
+                )
+                if audio_path in protected_raw_paths:
+                    with suppress(OSError):
+                        staging_audio_path.unlink(missing_ok=True)
+                else:
+                    audio_dir.mkdir(parents=True, exist_ok=True)
+                    staging_audio_path.replace(audio_path)
             except RuntimeError as exc:
                 errors.append(
                     {
@@ -365,6 +413,8 @@ class ProcessingService:
                         },
                     )
                 )
+            finally:
+                shutil.rmtree(staging_audio_dir, ignore_errors=True)
 
         return derived_items, errors
 
