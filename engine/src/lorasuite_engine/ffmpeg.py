@@ -101,7 +101,10 @@ def probe_video(video_path: Path) -> VideoMetadata:
             raise ValueError("format metadata must be an object")
         if "duration" not in format_metadata:
             raise ValueError("format duration is required")
-        duration = float(format_metadata["duration"])
+        raw_duration = format_metadata["duration"]
+        if isinstance(raw_duration, bool):
+            raise ValueError("format duration must not be boolean")
+        duration = float(raw_duration)
         if not isfinite(duration) or duration < 0:
             raise ValueError("duration must be finite and non-negative")
         width = _positive_int_metadata(stream.get("width"), "width")
