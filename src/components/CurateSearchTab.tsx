@@ -1,20 +1,25 @@
 import { useMemo, useState } from "react";
 
 import type { EngineClient } from "../lib/api";
-import type { MediaItem, MediaType } from "../lib/types";
+import type { MediaItem, MediaType, ProcessingJob, ProcessingJobStatus } from "../lib/types";
 
 interface CurateSearchTabProps {
   mediaItems: MediaItem[];
   engine: Pick<EngineClient, "assetUrl" | "createProcessingJob" | "getProcessingJob">;
+  isActive?: boolean;
   onSendToIdentify(items: MediaItem[]): void;
   onMediaItemsGenerated(items: MediaItem[]): void;
 }
 
 type MediaTypeFilter = "all" | MediaType;
+const PROCESSING_JOB_POLL_DELAY_MS = 500;
+const PROCESSING_JOB_MAX_DETAIL_ATTEMPTS = 5;
+const terminalProcessingStatuses = new Set<ProcessingJobStatus>(["complete", "failed", "canceled"]);
 
 export function CurateSearchTab({
   mediaItems,
   engine,
+  isActive = true,
   onSendToIdentify,
   onMediaItemsGenerated,
 }: CurateSearchTabProps) {
@@ -22,6 +27,7 @@ export function CurateSearchTab({
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [breakdownSourceIds, setBreakdownSourceIds] = useState<Set<string>>(() => new Set());
+  const [breakdownInFlight, setBreakdownInFlight] = useState(false);
   const [status, setStatus] = useState("Idle");
   const visibleItems = useMemo(
     () =>
@@ -87,11 +93,15 @@ export function CurateSearchTab({
   }
 
   async function breakDownSelectedVideos() {
+    if (breakdownInFlight) {
+      return;
+    }
     if (selectedBreakdownVideoIds.length === 0) {
       setStatus("Select at least one video for Breakdown.");
       return;
     }
 
+    setBreakdownInFlight(true);
     try {
       setStatus(
         `Launching video breakdown for ${selectedBreakdownVideoIds.length} video${
@@ -108,14 +118,22 @@ export function CurateSearchTab({
       });
       setStatus(processingJobStatusMessage(job));
 
-      const detail = await engine.getProcessingJob(job.id);
+      const detail = await pollProcessingJob(job.id, engine.getProcessingJob, (nextDetail) => {
+        setStatus(processingJobStatusMessage(nextDetail));
+      });
       if (detail.derived_media_items.length > 0) {
         onMediaItemsGenerated(detail.derived_media_items);
       }
       setStatus(processingJobStatusMessage(detail));
     } catch (error) {
       setStatus(`Video breakdown error: ${errorMessage(error)}`);
+    } finally {
+      setBreakdownInFlight(false);
     }
+  }
+
+  if (!isActive) {
+    return null;
   }
 
   return (
@@ -187,7 +205,7 @@ export function CurateSearchTab({
             className="primary-action"
             type="button"
             onClick={breakDownSelectedVideos}
-            disabled={selectedBreakdownVideoIds.length === 0}
+            disabled={breakdownInFlight || selectedBreakdownVideoIds.length === 0}
           >
             Break Down Selected Videos
           </button>
@@ -313,9 +331,33 @@ function searchableText(item: MediaItem): string {
     .toLowerCase();
 }
 
-function processingJobStatusMessage(
-  job: Awaited<ReturnType<EngineClient["getProcessingJob"]>>,
-): string {
+async function pollProcessingJob(
+  jobId: string,
+  getProcessingJob: EngineClient["getProcessingJob"],
+  onDetail: (job: ProcessingJob) => void,
+): Promise<ProcessingJob> {
+  let latestDetail: ProcessingJob | undefined;
+  for (let attempt = 0; attempt < PROCESSING_JOB_MAX_DETAIL_ATTEMPTS; attempt += 1) {
+    latestDetail = await getProcessingJob(jobId);
+    onDetail(latestDetail);
+    if (terminalProcessingStatuses.has(latestDetail.status)) {
+      return latestDetail;
+    }
+    if (attempt < PROCESSING_JOB_MAX_DETAIL_ATTEMPTS - 1) {
+      await delay(PROCESSING_JOB_POLL_DELAY_MS);
+    }
+  }
+
+  throw new Error(
+    `Video breakdown job ${jobId} did not finish after ${PROCESSING_JOB_MAX_DETAIL_ATTEMPTS} checks.`,
+  );
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function processingJobStatusMessage(job: ProcessingJob): string {
   if (job.status === "complete") {
     if (job.derived_media_items.length > 0) {
       return `Generated ${job.derived_media_items.length} derivative media item${
@@ -339,7 +381,7 @@ function processingJobStatusMessage(
   return `Video breakdown job ${job.id} status: ${job.status}.`;
 }
 
-function jobErrorMessage(job: Awaited<ReturnType<EngineClient["getProcessingJob"]>>): string {
+function jobErrorMessage(job: ProcessingJob): string {
   const firstError = job.errors[0];
   if (firstError) {
     const message = firstError.message;

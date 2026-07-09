@@ -1,10 +1,19 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import App from "../App";
 import { CurateSearchTab } from "./CurateSearchTab";
 import type { EngineClient } from "../lib/api";
-import type { MediaItem } from "../lib/types";
+import type { MediaItem, ProcessingJob } from "../lib/types";
+
+const { isTauriMock } = vi.hoisted(() => ({
+  isTauriMock: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: isTauriMock,
+}));
 
 describe("CurateSearchTab", () => {
   type CurateSearchEngine = Pick<
@@ -39,6 +48,12 @@ describe("CurateSearchTab", () => {
       status: "new",
     },
   ];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("searches imported media by path and metadata", async () => {
     const user = userEvent.setup();
@@ -187,6 +202,163 @@ describe("CurateSearchTab", () => {
     expect(screen.getByText("Generated 2 derivative media items.")).toBeInTheDocument();
   });
 
+  it("polls queued and running video breakdown jobs until generated media are available", async () => {
+    vi.useFakeTimers();
+    const generatedItems: MediaItem[] = [
+      {
+        id: "media_frame_polled",
+        raw_path: "/tmp/vault/derived/video/frame-polled.png",
+        media_type: "image",
+        width: 1920,
+        height: 1080,
+        status: "new",
+      },
+    ];
+    const engine = engineStub({
+      createProcessingJob: vi.fn().mockResolvedValue(processingJob({ status: "queued" })),
+      getProcessingJob: vi
+        .fn()
+        .mockResolvedValueOnce(processingJob({ status: "queued" }))
+        .mockResolvedValueOnce(
+          processingJob({ status: "running", progress_message: "Extracting frames" }),
+        )
+        .mockResolvedValueOnce(
+          processingJob({
+            status: "complete",
+            progress_message: "Generated derivatives",
+            derived_media_items: generatedItems,
+          }),
+        ),
+    });
+    const onMediaItemsGenerated = vi.fn();
+
+    render(
+      <CurateSearchTab
+        mediaItems={mediaItems}
+        engine={engine}
+        onSendToIdentify={vi.fn()}
+        onMediaItemsGenerated={onMediaItemsGenerated}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Select for Breakdown: video.mp4"));
+    fireEvent.click(screen.getByRole("button", { name: "Break Down Selected Videos" }));
+
+    await act(flushPromises);
+    expect(engine.getProcessingJob).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(engine.getProcessingJob).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+      await flushPromises();
+    });
+    expect(engine.getProcessingJob).toHaveBeenCalledTimes(3);
+    expect(onMediaItemsGenerated).toHaveBeenCalledWith(generatedItems);
+    expect(screen.getByText("Generated 1 derivative media item.")).toBeInTheDocument();
+  });
+
+  it("ignores repeated breakdown clicks while a processing job is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveCreatedJob: (job: ProcessingJob) => void = () => {};
+    const createdJobPromise = new Promise<ProcessingJob>((resolve) => {
+      resolveCreatedJob = resolve;
+    });
+    const engine = engineStub({
+      createProcessingJob: vi.fn(() => createdJobPromise),
+      getProcessingJob: vi
+        .fn()
+        .mockResolvedValue(processingJob({ status: "complete", derived_media_items: [] })),
+    });
+
+    render(
+      <CurateSearchTab
+        mediaItems={mediaItems}
+        engine={engine}
+        onSendToIdentify={vi.fn()}
+        onMediaItemsGenerated={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Select for Breakdown: video.mp4"));
+    const breakdownButton = screen.getByRole("button", { name: "Break Down Selected Videos" });
+
+    await user.click(breakdownButton);
+    await user.click(breakdownButton);
+
+    expect(engine.createProcessingJob).toHaveBeenCalledTimes(1);
+    expect(breakdownButton).toBeDisabled();
+
+    resolveCreatedJob(processingJob({ status: "queued" }));
+    await waitFor(() => expect(engine.getProcessingJob).toHaveBeenCalledWith("processing_1"));
+  });
+
+  it("preserves Curate search state when switching workspace tabs", async () => {
+    const user = userEvent.setup();
+    isTauriMock.mockReturnValue(true);
+    window.localStorage.clear();
+    const completedJob = {
+      id: "job_1",
+      source_kind: "instagram",
+      candidate_ids: ["candidate_poster", "candidate_voice"],
+      reviewed_candidate_ids: ["candidate_poster", "candidate_voice"],
+      candidate_count: 2,
+      selected_count: 2,
+      imported_count: 2,
+      deferred_count: 0,
+      skipped_count: 0,
+      failed_count: 0,
+      status: "complete",
+      progress_message: "Ingress complete",
+      errors: [],
+      deferred_candidates: [],
+      imported_media_items: [
+        {
+          id: "media_curate_portrait",
+          raw_path: "/tmp/vault/raw/curate-portrait.png",
+          media_type: "image",
+          width: 768,
+          height: 1024,
+          status: "new",
+        },
+        {
+          id: "media_curate_voice",
+          raw_path: "/tmp/vault/raw/curate-voice.m4a",
+          media_type: "audio",
+          duration: 12.4,
+          status: "new",
+        },
+      ],
+      created_at: "2026-07-09T00:00:00Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [completedJob],
+      }),
+    );
+
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Curate" }));
+    expect(await screen.findByText("curate-portrait.png")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Search media"), "portrait");
+    expect(screen.queryByText("curate-voice.m4a")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Identify" }));
+    await user.click(screen.getByRole("tab", { name: "Curate" }));
+
+    expect(screen.getByLabelText("Search media")).toHaveValue("portrait");
+    expect(screen.getByText("curate-portrait.png")).toBeInTheDocument();
+    expect(screen.queryByText("curate-voice.m4a")).not.toBeInTheDocument();
+  });
+
   function engineStub(overrides: Partial<CurateSearchEngine> = {}): CurateSearchEngine {
     return {
       assetUrl: vi.fn((path: string) => `/asset/${path}`),
@@ -194,5 +366,28 @@ describe("CurateSearchTab", () => {
       getProcessingJob: vi.fn().mockRejectedValue(new Error("Unexpected processing job detail")),
       ...overrides,
     };
+  }
+
+  function processingJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
+    return {
+      id: "processing_1",
+      job_type: "video_breakdown",
+      source_media_item_ids: ["media_video"],
+      options: {
+        generate_frames: true,
+        extract_audio: true,
+      },
+      status: "queued",
+      progress_message: "Queued",
+      errors: [],
+      derived_media_items: [],
+      created_at: "2026-07-09T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
   }
 });

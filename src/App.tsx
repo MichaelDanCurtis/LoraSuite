@@ -63,14 +63,13 @@ function App() {
             onMediaItemsImported={addMediaItems}
           />
         </div>
-        {activeTab === "curate" ? (
-          <CurateSearchTab
-            mediaItems={mediaItems}
-            engine={engine}
-            onSendToIdentify={sendToIdentify}
-            onMediaItemsGenerated={addMediaItems}
-          />
-        ) : null}
+        <CurateSearchTab
+          mediaItems={mediaItems}
+          engine={engine}
+          isActive={activeTab === "curate"}
+          onSendToIdentify={sendToIdentify}
+          onMediaItemsGenerated={addMediaItems}
+        />
         {activeTab === "identify" ? (
           <IdentifyTab mediaItems={identifyItems} assetUrl={engine.assetUrl} />
         ) : null}
