@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from lorasuite_engine.models import (
     AssetRole,
     DerivativeType,
@@ -47,3 +50,19 @@ def test_video_breakdown_options_have_safe_defaults():
     assert options.max_frame_count == 6
     assert options.extract_audio is True
     assert options.generate_frames is True
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("frames_per_second", True),
+        ("frames_per_second", "2"),
+        ("frames_per_second", 2.0),
+        ("max_frame_count", True),
+        ("max_frame_count", "2"),
+        ("max_frame_count", 2.0),
+    ],
+)
+def test_video_breakdown_options_reject_coerced_integer_values(field_name, invalid_value):
+    with pytest.raises(ValidationError):
+        VideoBreakdownOptions(**{field_name: invalid_value})

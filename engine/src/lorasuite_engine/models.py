@@ -177,7 +177,7 @@ class VideoBreakdownOptions(BaseModel):
     frames_per_second: int = 1
     max_frame_count: int = 6
 
-    @field_validator("frames_per_second", "max_frame_count")
+    @field_validator("frames_per_second", "max_frame_count", mode="before")
     @classmethod
     def positive_integer(cls, value: int) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
