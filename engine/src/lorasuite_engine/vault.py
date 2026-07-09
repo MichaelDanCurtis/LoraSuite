@@ -193,10 +193,10 @@ class VaultService:
             width=width,
             height=height,
             metadata_json={
+                **(metadata or {}),
                 "asset_role": AssetRole.DERIVATIVE,
                 "derivative_type": derivative_type,
                 "source_media_item_id": source_item.id,
-                **(metadata or {}),
             },
         )
 

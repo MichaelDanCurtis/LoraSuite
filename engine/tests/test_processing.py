@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -89,19 +90,32 @@ def test_vault_appends_derivative_media_items_without_new_source(tmp_path):
     Image.new("RGB", (16, 16), color=(10, 130, 40)).save(derivative_image)
     vault = VaultService(tmp_path / "vault")
     source_item = vault.import_local_paths([source_image]).media_items[0]
+    expected_derivative_sha256 = sha256(derivative_image.read_bytes()).hexdigest()
     derivative = vault.build_derivative_media_item(
         source_item=source_item,
         derivative_path=derivative_image,
         media_type=MediaType.IMAGE,
         derivative_type=DerivativeType.VIDEO_FRAME,
-        metadata={"time_range": {"start_seconds": 0.0, "end_seconds": 0.0}},
+        metadata={
+            "asset_role": "source",
+            "time_range": {"start_seconds": 0.0, "end_seconds": 0.0},
+        },
     )
 
+    vault.append_media_items([derivative])
     vault.append_media_items([derivative])
     manifest = json.loads(vault.manifest_path.read_text(encoding="utf-8"))
     all_items = vault.list_media_items()
 
     assert len(all_items) == 2
     assert len(manifest["sources"]) == 1
+    assert all_items[1].sha256 == expected_derivative_sha256
+    assert all_items[1].width == 16
+    assert all_items[1].height == 16
     assert all_items[1].metadata_json["asset_role"] == AssetRole.DERIVATIVE
+    assert all_items[1].metadata_json["derivative_type"] == DerivativeType.VIDEO_FRAME
     assert all_items[1].metadata_json["source_media_item_id"] == source_item.id
+    assert all_items[1].metadata_json["time_range"] == {
+        "start_seconds": 0.0,
+        "end_seconds": 0.0,
+    }
