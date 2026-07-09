@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
+import wave
 
 import pytest
 
@@ -9,7 +10,10 @@ import lorasuite_engine.ffmpeg as ffmpeg_module
 from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
 
 
-ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
+ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="FFmpeg or ffprobe is not installed",
+)
 
 
 @ffmpeg
@@ -146,6 +150,11 @@ def test_extract_frames_rejects_invalid_fps_types_and_values(
         )
 
 
+@pytest.mark.parametrize("value", ["0/0", "nan", "inf", "-1", "0", "-1/2", "0/1", "N/A"])
+def test_parse_fraction_returns_none_for_invalid_values(value: str):
+    assert ffmpeg_module._parse_fraction(value) is None
+
+
 def test_extract_frames_raises_runtime_error_with_ffmpeg_stderr(tmp_path: Path, monkeypatch):
     video_path = tmp_path / "source.mp4"
     video_path.write_bytes(b"not real video")
@@ -188,6 +197,29 @@ def test_failed_ffmpeg_run_does_not_leave_public_output_frames(tmp_path: Path, m
         )
 
     assert list(output_dir.glob("frame_*.png")) == []
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "{not json",
+        '{"streams": [{"width": 40, "height": 24, "avg_frame_rate": "N/A"}], "format": {"duration": "N/A"}}',
+    ],
+)
+def test_probe_video_raises_runtime_error_for_invalid_metadata(
+    tmp_path: Path,
+    monkeypatch,
+    stdout: str,
+):
+    def fake_run(command, **kwargs):
+        assert command[0] == "ffprobe"
+        assert kwargs["shell"] is False
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="ffprobe returned invalid metadata"):
+        probe_video(tmp_path / "source.mp4")
 
 
 @ffmpeg
@@ -257,3 +289,6 @@ def test_extract_audio_writes_wav_from_video(tmp_path: Path):
     assert audio_path == output_path
     assert audio_path.exists()
     assert audio_path.stat().st_size > 0
+    with wave.open(str(audio_path)) as wav_file:
+        assert wav_file.getnchannels() == 1
+        assert wav_file.getframerate() == 44100

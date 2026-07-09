@@ -51,12 +51,15 @@ def _run_ffmpeg_command(command: list[str]) -> subprocess.CompletedProcess[str]:
 def _parse_fraction(value: str | None) -> float | None:
     if not value:
         return None
-    if "/" not in value:
-        parsed = float(value)
-        return parsed if isfinite(parsed) and parsed > 0 else None
-    numerator_raw, denominator_raw = value.split("/", 1)
-    numerator = float(numerator_raw)
-    denominator = float(denominator_raw)
+    try:
+        if "/" not in value:
+            parsed = float(value)
+            return parsed if isfinite(parsed) and parsed > 0 else None
+        numerator_raw, denominator_raw = value.split("/", 1)
+        numerator = float(numerator_raw)
+        denominator = float(denominator_raw)
+    except ValueError:
+        return None
     if denominator == 0:
         return None
     parsed = numerator / denominator
@@ -77,10 +80,24 @@ def probe_video(video_path: Path) -> VideoMetadata:
         str(video_path),
     ]
     result = _run_ffmpeg_command(command)
-    payload = json.loads(result.stdout)
-    streams = payload.get("streams") or []
-    stream = streams[0] if streams else {}
-    duration = float(payload.get("format", {}).get("duration") or 0)
+    try:
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("metadata root must be an object")
+        streams = payload.get("streams") or []
+        if not isinstance(streams, list):
+            raise ValueError("streams must be a list")
+        stream = streams[0] if streams else {}
+        if not isinstance(stream, dict):
+            raise ValueError("video stream metadata must be an object")
+        format_metadata = payload.get("format") or {}
+        if not isinstance(format_metadata, dict):
+            raise ValueError("format metadata must be an object")
+        duration = float(format_metadata.get("duration") or 0)
+        if not isfinite(duration) or duration < 0:
+            raise ValueError("duration must be finite and non-negative")
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"ffprobe returned invalid metadata for {video_path}: {exc}") from exc
     return VideoMetadata(
         duration_seconds=duration,
         width=stream.get("width"),
