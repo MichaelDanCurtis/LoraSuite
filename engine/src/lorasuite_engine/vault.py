@@ -10,7 +10,14 @@ from uuid import uuid4
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from lorasuite_engine.models import MediaItem, MediaSource, MediaType, SourceKind
+from lorasuite_engine.models import (
+    AssetRole,
+    DerivativeType,
+    MediaItem,
+    MediaSource,
+    MediaType,
+    SourceKind,
+)
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
 SUPPORTED_AUDIO_SUFFIXES = frozenset({".aac", ".m4a", ".mp3", ".wav"})
@@ -130,6 +137,68 @@ class VaultService:
             self._write_manifest(manifest, source, new_media_items)
 
         return result
+
+    def list_media_items(self) -> list[MediaItem]:
+        manifest = self._read_manifest()
+        return [
+            MediaItem.model_validate(media_item_json)
+            for media_item_json in manifest.get("media_items", [])
+        ]
+
+    def get_media_item(self, media_item_id: str) -> MediaItem | None:
+        for media_item in self.list_media_items():
+            if media_item.id == media_item_id:
+                return media_item
+        return None
+
+    def append_media_items(self, media_items: list[MediaItem]) -> None:
+        if not media_items:
+            return
+        manifest = self._read_manifest()
+        media_items_json = manifest.setdefault("media_items", [])
+        existing_ids = {
+            item.get("id")
+            for item in media_items_json
+            if isinstance(item, dict)
+        }
+        for media_item in media_items:
+            if media_item.id not in existing_ids:
+                media_items_json.append(media_item.model_dump(mode="json"))
+                existing_ids.add(media_item.id)
+        self.vault_root.mkdir(parents=True, exist_ok=True)
+        self.manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def build_derivative_media_item(
+        self,
+        *,
+        source_item: MediaItem,
+        derivative_path: Path,
+        media_type: MediaType,
+        derivative_type: DerivativeType,
+        metadata: dict[str, Any] | None = None,
+    ) -> MediaItem:
+        digest = sha256_file(derivative_path)
+        width: int | None = None
+        height: int | None = None
+        if media_type == MediaType.IMAGE:
+            width, height = image_dimensions(derivative_path)
+        return MediaItem(
+            source_id=source_item.source_id,
+            raw_path=derivative_path,
+            media_type=media_type,
+            sha256=digest,
+            width=width,
+            height=height,
+            metadata_json={
+                "asset_role": AssetRole.DERIVATIVE,
+                "derivative_type": derivative_type,
+                "source_media_item_id": source_item.id,
+                **(metadata or {}),
+            },
+        )
 
     def _validate_local_path(self, path: Path) -> _ValidatedLocalPath | LocalImportError:
         if not path.exists():
