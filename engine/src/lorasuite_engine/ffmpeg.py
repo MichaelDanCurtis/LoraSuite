@@ -58,12 +58,20 @@ def _parse_fraction(value: str | None) -> float | None:
         numerator_raw, denominator_raw = value.split("/", 1)
         numerator = float(numerator_raw)
         denominator = float(denominator_raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     if denominator == 0:
         return None
     parsed = numerator / denominator
     return parsed if isfinite(parsed) and parsed > 0 else None
+
+
+def _optional_int_metadata(value: object, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer or null")
+    return value
 
 
 def probe_video(video_path: Path) -> VideoMetadata:
@@ -84,25 +92,33 @@ def probe_video(video_path: Path) -> VideoMetadata:
         payload = json.loads(result.stdout)
         if not isinstance(payload, dict):
             raise ValueError("metadata root must be an object")
-        streams = payload.get("streams") or []
-        if not isinstance(streams, list):
-            raise ValueError("streams must be a list")
-        stream = streams[0] if streams else {}
+        streams = payload.get("streams")
+        if not isinstance(streams, list) or not streams:
+            raise ValueError("metadata must include at least one video stream")
+        stream = streams[0]
         if not isinstance(stream, dict):
             raise ValueError("video stream metadata must be an object")
-        format_metadata = payload.get("format") or {}
+        format_metadata = payload.get("format")
         if not isinstance(format_metadata, dict):
             raise ValueError("format metadata must be an object")
-        duration = float(format_metadata.get("duration") or 0)
+        if "duration" not in format_metadata:
+            raise ValueError("format duration is required")
+        duration = float(format_metadata["duration"])
         if not isfinite(duration) or duration < 0:
             raise ValueError("duration must be finite and non-negative")
+        width = _optional_int_metadata(stream.get("width"), "width")
+        height = _optional_int_metadata(stream.get("height"), "height")
+        raw_fps = stream.get("avg_frame_rate")
+        if raw_fps is not None and not isinstance(raw_fps, str):
+            raise ValueError("avg_frame_rate must be a string or null")
+        fps = _parse_fraction(raw_fps)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise RuntimeError(f"ffprobe returned invalid metadata for {video_path}: {exc}") from exc
     return VideoMetadata(
         duration_seconds=duration,
-        width=stream.get("width"),
-        height=stream.get("height"),
-        fps=_parse_fraction(stream.get("avg_frame_rate")),
+        width=width,
+        height=height,
+        fps=fps,
     )
 
 

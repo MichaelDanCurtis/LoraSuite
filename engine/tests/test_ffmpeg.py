@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,7 +11,8 @@ import lorasuite_engine.ffmpeg as ffmpeg_module
 from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
 
 
-ffmpeg = pytest.mark.skipif(
+ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
+ffmpeg_probe = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="FFmpeg or ffprobe is not installed",
 )
@@ -204,6 +206,33 @@ def test_failed_ffmpeg_run_does_not_leave_public_output_frames(tmp_path: Path, m
     [
         "{not json",
         '{"streams": [{"width": 40, "height": 24, "avg_frame_rate": "N/A"}], "format": {"duration": "N/A"}}',
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": 1}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": ["1/1"]}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": {"value": "1/1"}}],
+                "format": {"duration": "1"},
+            }
+        ),
+        json.dumps({}),
+        json.dumps({"format": {"duration": "1"}}),
+        json.dumps({"streams": [{"width": 40, "height": 24, "avg_frame_rate": "1/1"}]}),
+        json.dumps(
+            {
+                "streams": [{"width": 40, "height": 24, "avg_frame_rate": "1/1"}],
+                "format": {},
+            }
+        ),
     ],
 )
 def test_probe_video_raises_runtime_error_for_invalid_metadata(
@@ -222,7 +251,7 @@ def test_probe_video_raises_runtime_error_for_invalid_metadata(
         probe_video(tmp_path / "source.mp4")
 
 
-@ffmpeg
+@ffmpeg_probe
 def test_probe_video_returns_duration_dimensions_and_fps(tmp_path: Path):
     video_path = tmp_path / "source.mp4"
     subprocess.run(
