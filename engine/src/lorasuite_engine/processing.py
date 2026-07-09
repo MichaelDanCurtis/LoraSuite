@@ -67,10 +67,12 @@ class ProcessingService:
         jobs[job.id] = job
         self._write_jobs(jobs)
 
+        processing_state = {"manifest_appended": False}
         try:
-            return self._process_running_job(jobs, job)
+            return self._process_running_job(jobs, job, processing_state)
         except Exception as exc:
-            self._delete_job_derivatives(job.id)
+            if not processing_state["manifest_appended"]:
+                self._delete_job_derivatives(job.id)
             job.status = ProcessingJobStatus.FAILED
             job.errors.append(
                 {
@@ -88,6 +90,7 @@ class ProcessingService:
         self,
         jobs: dict[str, ProcessingJob],
         job: ProcessingJob,
+        processing_state: dict[str, bool],
     ) -> ProcessingJob:
         if job.job_type != "video_breakdown":
             job.status = ProcessingJobStatus.FAILED
@@ -158,10 +161,16 @@ class ProcessingService:
             job.errors.extend(breakdown_errors)
 
         if derived_items:
+            derived_items, items_to_append = self._resolve_manifest_derivatives(
+                vault,
+                derived_items,
+            )
             try:
-                vault.append_media_items(derived_items)
+                if items_to_append:
+                    vault.append_media_items(items_to_append)
+                processing_state["manifest_appended"] = True
             except Exception:
-                self._delete_derived_files(derived_items)
+                self._delete_derived_files(items_to_append)
                 raise
         job.derived_media_items = derived_items
         job.status = (
@@ -193,6 +202,30 @@ class ProcessingService:
         for item in derived_items:
             with suppress(OSError):
                 item.raw_path.unlink(missing_ok=True)
+
+    def _resolve_manifest_derivatives(
+        self,
+        vault: VaultService,
+        candidate_items: list[MediaItem],
+    ) -> tuple[list[MediaItem], list[MediaItem]]:
+        existing_by_raw_path = {
+            Path(item.raw_path): item
+            for item in vault.list_media_items()
+        }
+        resolved_items: list[MediaItem] = []
+        items_to_append: list[MediaItem] = []
+        for candidate_item in candidate_items:
+            raw_path = Path(candidate_item.raw_path)
+            existing_item = existing_by_raw_path.get(raw_path)
+            if existing_item is not None:
+                resolved_items.append(existing_item)
+                continue
+
+            resolved_items.append(candidate_item)
+            items_to_append.append(candidate_item)
+            existing_by_raw_path[raw_path] = candidate_item
+
+        return resolved_items, items_to_append
 
     def _delete_job_derivatives(self, job_id: str) -> None:
         shutil.rmtree(
