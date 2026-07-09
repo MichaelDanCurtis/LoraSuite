@@ -149,6 +149,119 @@ describe("createEngineClient", () => {
     });
   });
 
+  it("creates a processing job", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "processing_1",
+        job_type: "video_breakdown",
+        source_media_item_ids: ["media_1"],
+        options: {
+          frames_per_second: 2,
+          max_frame_count: 48,
+          extract_audio: true,
+          generate_frames: true,
+        },
+        status: "queued",
+        progress_message: "Queued",
+        errors: [],
+        derived_media_items: [{ id: "media_frame_1", media_type: "image" }],
+        created_at: "2026-07-09T12:00:00Z",
+        started_at: null,
+        completed_at: null,
+      }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+
+    const result = await client.createProcessingJob({
+      job_type: "video_breakdown",
+      source_media_item_ids: ["media_1"],
+      options: {
+        frames_per_second: 2,
+        max_frame_count: 48,
+        extract_audio: true,
+        generate_frames: true,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("http://engine.test/processing/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_type: "video_breakdown",
+        source_media_item_ids: ["media_1"],
+        options: {
+          frames_per_second: 2,
+          max_frame_count: 48,
+          extract_audio: true,
+          generate_frames: true,
+        },
+      }),
+    });
+    expect(result.id).toBe("processing_1");
+  });
+
+  it("lists processing jobs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: "processing_1",
+          job_type: "video_breakdown",
+          source_media_item_ids: ["media_1"],
+          options: {},
+          status: "running",
+          progress_message: "Extracting frames",
+          errors: [],
+          derived_media_items: [],
+          created_at: "2026-07-09T12:00:00Z",
+          started_at: "2026-07-09T12:01:00Z",
+          completed_at: null,
+        },
+      ],
+    });
+    const client = createEngineClient("http://engine.test/", fetchMock);
+
+    const result = await client.listProcessingJobs();
+
+    expect(fetchMock).toHaveBeenCalledWith("http://engine.test/processing/jobs", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(result[0].status).toBe("running");
+  });
+
+  it("gets a processing job by id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "processing_1",
+        job_type: "video_breakdown",
+        source_media_item_ids: ["media_1"],
+        options: {},
+        status: "complete",
+        progress_message: "Done",
+        errors: [],
+        derived_media_items: [{ id: "audio_1", media_type: "audio" }],
+        created_at: "2026-07-09T12:00:00Z",
+        started_at: "2026-07-09T12:01:00Z",
+        completed_at: "2026-07-09T12:02:00Z",
+      }),
+    });
+    const client = createEngineClient("http://engine.test", fetchMock);
+
+    const result = await client.getProcessingJob("processing_1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://engine.test/processing/jobs/processing_1", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(result.derived_media_items[0].id).toBe("audio_1");
+  });
+
   it("builds engine asset URLs for local vault paths", () => {
     const client = createEngineClient("http://engine.test/");
 

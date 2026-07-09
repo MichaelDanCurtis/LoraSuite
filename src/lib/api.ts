@@ -1,10 +1,12 @@
 import type {
   CreateIngressJobRequest,
+  CreateProcessingJobRequest,
   ExportPackage,
   InstagramScanMode,
   IngressJob,
   IngressScanResult,
   LocalImportResponse,
+  ProcessingJob,
   RunComfyExportRequest,
   SourceKind,
 } from "./types";
@@ -36,6 +38,9 @@ export interface EngineClient {
   createIngressJob(request: CreateIngressJobRequest): Promise<IngressJob>;
   listIngressJobs(): Promise<IngressJob[]>;
   getIngressJob(jobId: string): Promise<IngressJob>;
+  createProcessingJob(request: CreateProcessingJobRequest): Promise<ProcessingJob>;
+  listProcessingJobs(): Promise<ProcessingJob[]>;
+  getProcessingJob(jobId: string): Promise<ProcessingJob>;
   exportRunComfyImage(request: RunComfyExportRequest): Promise<ExportPackage>;
   assetUrl(path: string): string;
 }
@@ -119,6 +124,15 @@ export function createEngineClient(
     },
     getIngressJob(jobId: string) {
       return getJson<IngressJob>(`/ingress/jobs/${jobId}`);
+    },
+    createProcessingJob(request: CreateProcessingJobRequest) {
+      return postJson<ProcessingJob>("/processing/jobs", request);
+    },
+    listProcessingJobs() {
+      return getJson<ProcessingJob[]>("/processing/jobs");
+    },
+    getProcessingJob(jobId: string) {
+      return getJson<ProcessingJob>(`/processing/jobs/${jobId}`);
     },
     exportRunComfyImage(request: RunComfyExportRequest) {
       return postJson<ExportPackage>("/exports/runcomfy-image", request);

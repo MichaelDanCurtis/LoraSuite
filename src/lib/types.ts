@@ -3,6 +3,7 @@ export type SourceKind = "local" | "instagram" | "x_twitter" | "tiktok";
 export type InstagramScanMode = "all" | "feed" | "reels" | "tagged";
 export type IngressCandidateStatus = "ready" | "duplicate" | "unsupported" | "error";
 export type IngressJobStatus = "queued" | "running" | "complete" | "failed" | "canceled";
+export type ProcessingJobStatus = "queued" | "running" | "complete" | "failed" | "canceled";
 
 export interface ImportErrorInfo {
   path: string;
@@ -74,6 +75,33 @@ export interface IngressJob {
   errors: Array<Record<string, string>>;
   deferred_candidates: Array<Record<string, unknown>>;
   imported_media_items: MediaItem[];
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface VideoBreakdownOptions {
+  frames_per_second?: number;
+  max_frame_count?: number;
+  extract_audio?: boolean;
+  generate_frames?: boolean;
+}
+
+export interface CreateProcessingJobRequest {
+  job_type: "video_breakdown";
+  source_media_item_ids: string[];
+  options?: VideoBreakdownOptions;
+}
+
+export interface ProcessingJob {
+  id: string;
+  job_type: "video_breakdown";
+  source_media_item_ids: string[];
+  options: VideoBreakdownOptions;
+  status: ProcessingJobStatus;
+  progress_message: string;
+  errors: Array<Record<string, string>>;
+  derived_media_items: MediaItem[];
   created_at: string;
   started_at?: string | null;
   completed_at?: string | null;
