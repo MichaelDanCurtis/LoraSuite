@@ -1,4 +1,5 @@
 import json
+import shutil
 from contextlib import suppress
 from pathlib import Path
 
@@ -13,6 +14,15 @@ from lorasuite_engine.models import (
     utc_now,
 )
 from lorasuite_engine.vault import VaultService
+
+
+TERMINAL_PROCESSING_STATUSES = frozenset(
+    {
+        ProcessingJobStatus.COMPLETE,
+        ProcessingJobStatus.FAILED,
+        ProcessingJobStatus.CANCELED,
+    }
+)
 
 
 class ProcessingService:
@@ -46,18 +56,21 @@ class ProcessingService:
     def process_job(self, job_id: str) -> ProcessingJob:
         jobs = self._read_jobs()
         job = jobs[job_id]
-        if job.status != ProcessingJobStatus.QUEUED:
+        if job.status in TERMINAL_PROCESSING_STATUSES:
             return job
 
         job.status = ProcessingJobStatus.RUNNING
         job.started_at = utc_now()
         job.progress_message = "Breaking down video media"
+        job.derived_media_items = []
+        job.errors = []
         jobs[job.id] = job
         self._write_jobs(jobs)
 
         try:
             return self._process_running_job(jobs, job)
         except Exception as exc:
+            self._delete_job_derivatives(job.id)
             job.status = ProcessingJobStatus.FAILED
             job.errors.append(
                 {
@@ -180,6 +193,12 @@ class ProcessingService:
         for item in derived_items:
             with suppress(OSError):
                 item.raw_path.unlink(missing_ok=True)
+
+    def _delete_job_derivatives(self, job_id: str) -> None:
+        shutil.rmtree(
+            self.derivatives_dir / "video_breakdowns" / job_id,
+            ignore_errors=True,
+        )
 
     def _breakdown_video(
         self,

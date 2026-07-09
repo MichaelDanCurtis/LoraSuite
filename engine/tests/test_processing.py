@@ -334,6 +334,47 @@ def test_video_breakdown_fails_with_error_when_no_frames_are_extracted(
     assert completed.errors[0]["code"] == "no_frames_extracted"
 
 
+def test_process_job_retries_stale_running_job(tmp_path, monkeypatch):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def extract_single_frame(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = output_dir / "frame_00001.png"
+        Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+        return [frame_path]
+
+    monkeypatch.setattr(processing_module, "extract_frames", extract_single_frame)
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=1),
+    )
+    jobs = service._read_jobs()
+    jobs[job.id].status = ProcessingJobStatus.RUNNING
+    jobs[job.id].progress_message = "Breaking down video media"
+    service._write_jobs(jobs)
+
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.COMPLETE
+    assert completed.derived_media_items
+    assert service.get_job(job.id) == completed
+
+
 @ffmpeg
 def test_process_job_returns_terminal_job_without_duplicate_manifest_rows(tmp_path):
     source_video = create_test_video(tmp_path / "source.mp4")
@@ -403,6 +444,64 @@ def test_video_breakdown_persists_failed_job_for_unexpected_processing_error(
     assert "manifest write failed" in completed.errors[-1]["message"]
     assert not [path for path in derivative_root.rglob("*") if path.is_file()]
     assert persisted == completed
+
+
+def test_video_breakdown_cleans_generated_files_when_derivative_build_fails(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def extract_single_frame(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = output_dir / "frame_00001.png"
+        Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+        return [frame_path]
+
+    monkeypatch.setattr(processing_module, "extract_frames", extract_single_frame)
+
+    def fail_build_derivative(
+        self: VaultService,
+        *,
+        source_item: MediaItem,
+        derivative_path: Path,
+        media_type: MediaType,
+        derivative_type: DerivativeType,
+        metadata: dict[str, object] | None = None,
+    ) -> MediaItem:
+        raise RuntimeError("derivative metadata failed")
+
+    monkeypatch.setattr(
+        VaultService,
+        "build_derivative_media_item",
+        fail_build_derivative,
+    )
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=1),
+    )
+    completed = service.process_job(job.id)
+    derivative_root = tmp_path / "vault" / "derivatives" / "video_breakdowns" / job.id
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[-1]["code"] == "processing_failed"
+    assert "derivative metadata failed" in completed.errors[-1]["message"]
+    assert not [path for path in derivative_root.rglob("*") if path.is_file()]
 
 
 def test_video_breakdown_keeps_frame_derivatives_when_audio_extraction_fails(
