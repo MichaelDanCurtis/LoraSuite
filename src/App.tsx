@@ -1,29 +1,35 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { CurateSearchTab } from "./components/CurateSearchTab";
 import { DataIngressTab } from "./components/DataIngressTab";
-import { ExportsTab } from "./components/ExportsTab";
-import { VideoReviewTab } from "./components/VideoReviewTab";
+import { IdentifyTab } from "./components/IdentifyTab";
+import { TrainTab } from "./components/TrainTab";
 import { createEngineClient } from "./lib/api";
 import type { MediaItem } from "./lib/types";
 
-type TabId = "ingress" | "curate" | "video" | "exports";
+type TabId = "ingest" | "curate" | "identify" | "train";
 
 const tabs: Array<{ id: TabId; label: string }> = [
-  { id: "ingress", label: "Data Ingress" },
-  { id: "curate", label: "Curate / Search" },
-  { id: "video", label: "Video Review" },
-  { id: "exports", label: "Exports" },
+  { id: "ingest", label: "Data Ingest" },
+  { id: "curate", label: "Curate" },
+  { id: "identify", label: "Identify" },
+  { id: "train", label: "Train" },
 ];
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("ingress");
+  const [activeTab, setActiveTab] = useState<TabId>("ingest");
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [identifyItems, setIdentifyItems] = useState<MediaItem[]>([]);
   const engine = useMemo(() => createEngineClient(), []);
 
-  function addMediaItems(items: MediaItem[]) {
-    setMediaItems((existingItems) => [...existingItems, ...items]);
-  }
+  const addMediaItems = useCallback((items: MediaItem[]) => {
+    setMediaItems((existingItems) => mergeMediaItems(existingItems, items));
+  }, []);
+
+  const sendToIdentify = useCallback((items: MediaItem[]) => {
+    setIdentifyItems((existingItems) => mergeMediaItems(existingItems, items));
+    setActiveTab("identify");
+  }, []);
 
   return (
     <main className="app-shell">
@@ -50,25 +56,51 @@ function App() {
       </nav>
 
       <section className="workspace-panel" role="tabpanel">
-        <div hidden={activeTab !== "ingress"}>
+        <div hidden={activeTab !== "ingest"}>
           <DataIngressTab
             engine={engine}
             mediaItems={mediaItems}
             onMediaItemsImported={addMediaItems}
           />
         </div>
-        <div hidden={activeTab !== "curate"}>
-          <CurateSearchTab mediaItems={mediaItems} assetUrl={engine.assetUrl} />
-        </div>
-        <div hidden={activeTab !== "video"}>
-          <VideoReviewTab mediaItems={mediaItems} />
-        </div>
-        <div hidden={activeTab !== "exports"}>
-          <ExportsTab engine={engine} />
-        </div>
+        {activeTab === "curate" ? (
+          <CurateSearchTab
+            mediaItems={mediaItems}
+            engine={engine}
+            onSendToIdentify={sendToIdentify}
+            onMediaItemsGenerated={addMediaItems}
+          />
+        ) : null}
+        {activeTab === "identify" ? (
+          <IdentifyTab mediaItems={identifyItems} assetUrl={engine.assetUrl} />
+        ) : null}
+        {activeTab === "train" ? (
+          <TrainTab engine={engine} targetItems={identifyItems} />
+        ) : null}
       </section>
     </main>
   );
+}
+
+function mergeMediaItems(existingItems: MediaItem[], nextItems: MediaItem[]): MediaItem[] {
+  if (nextItems.length === 0) {
+    return existingItems;
+  }
+
+  const existingKeys = new Set(existingItems.map(mediaItemKey));
+  const uniqueItems = nextItems.filter((item) => {
+    const key = mediaItemKey(item);
+    if (existingKeys.has(key)) {
+      return false;
+    }
+    existingKeys.add(key);
+    return true;
+  });
+  return uniqueItems.length === 0 ? existingItems : [...existingItems, ...uniqueItems];
+}
+
+function mediaItemKey(item: MediaItem): string {
+  return item.raw_path ?? item.id;
 }
 
 export default App;
