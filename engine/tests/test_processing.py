@@ -396,11 +396,66 @@ def test_video_breakdown_persists_failed_job_for_unexpected_processing_error(
     )
     completed = service.process_job(job.id)
     persisted = service.get_job(job.id)
+    derivative_root = tmp_path / "vault" / "derivatives" / "video_breakdowns" / job.id
 
     assert completed.status == ProcessingJobStatus.FAILED
     assert completed.errors[-1]["code"] == "processing_failed"
     assert "manifest write failed" in completed.errors[-1]["message"]
+    assert not [path for path in derivative_root.rglob("*") if path.is_file()]
     assert persisted == completed
+
+
+def test_video_breakdown_keeps_frame_derivatives_when_audio_extraction_fails(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+
+    def extract_single_frame(
+        video_path: Path,
+        output_dir: Path,
+        start_seconds: float,
+        end_seconds: float,
+        frames_per_second: int,
+    ) -> list[Path]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = output_dir / "frame_00001.png"
+        Image.new("RGB", (16, 16), color=(20, 10, 40)).save(frame_path)
+        return [frame_path]
+
+    monkeypatch.setattr(processing_module, "extract_frames", extract_single_frame)
+
+    def fail_audio(video_path: Path, output_path: Path) -> Path:
+        raise RuntimeError("audio stream missing")
+
+    monkeypatch.setattr(processing_module, "extract_audio", fail_audio)
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+    completed = service.process_job(job.id)
+
+    frame_items = [
+        item
+        for item in completed.derived_media_items
+        if item.metadata_json["derivative_type"] == DerivativeType.VIDEO_FRAME
+    ]
+    manifest_item_ids = {item.id for item in vault.list_media_items()}
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert any(error["code"] == "audio_extraction_failed" for error in completed.errors)
+    assert frame_items
+    assert all(item.raw_path.exists() for item in frame_items)
+    assert all(item.id in manifest_item_ids for item in frame_items)
 
 
 def test_video_breakdown_fails_for_missing_source_media(tmp_path):

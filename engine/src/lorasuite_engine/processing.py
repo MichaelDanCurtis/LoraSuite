@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 from pathlib import Path
 
 from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
@@ -144,7 +145,11 @@ class ProcessingService:
             job.errors.extend(breakdown_errors)
 
         if derived_items:
-            vault.append_media_items(derived_items)
+            try:
+                vault.append_media_items(derived_items)
+            except Exception:
+                self._delete_derived_files(derived_items)
+                raise
         job.derived_media_items = derived_items
         job.status = (
             ProcessingJobStatus.COMPLETE
@@ -170,6 +175,11 @@ class ProcessingService:
 
     def get_job(self, job_id: str) -> ProcessingJob | None:
         return self._read_jobs().get(job_id)
+
+    def _delete_derived_files(self, derived_items: list[MediaItem]) -> None:
+        for item in derived_items:
+            with suppress(OSError):
+                item.raw_path.unlink(missing_ok=True)
 
     def _breakdown_video(
         self,
