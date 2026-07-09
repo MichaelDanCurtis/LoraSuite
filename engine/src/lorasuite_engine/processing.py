@@ -68,6 +68,30 @@ class ProcessingService:
         options = VideoBreakdownOptions.model_validate(job.options)
         derived_items: list[MediaItem] = []
 
+        if not job.source_media_item_ids:
+            job.errors.append(
+                {
+                    "code": "no_source_media",
+                    "message": "at least one source media item is required",
+                }
+            )
+
+        if not options.generate_frames and not options.extract_audio:
+            job.errors.append(
+                {
+                    "code": "no_derivatives_requested",
+                    "message": "at least one derivative output must be requested",
+                }
+            )
+
+        if job.errors:
+            job.status = ProcessingJobStatus.FAILED
+            job.progress_message = "Video breakdown completed with errors"
+            job.completed_at = utc_now()
+            jobs[job.id] = job
+            self._write_jobs(jobs)
+            return job
+
         for media_item_id in job.source_media_item_ids:
             source_item = vault.get_media_item(media_item_id)
             if source_item is None:
@@ -87,6 +111,7 @@ class ProcessingService:
                 )
                 continue
             breakdown_items, breakdown_errors = self._breakdown_video(
+                job.id,
                 vault,
                 source_item,
                 options,
@@ -124,6 +149,7 @@ class ProcessingService:
 
     def _breakdown_video(
         self,
+        job_id: str,
         vault: VaultService,
         source_item: MediaItem,
         options: VideoBreakdownOptions,
@@ -141,10 +167,17 @@ class ProcessingService:
                 }
             ]
 
-        end_seconds = max(0.1, min(metadata.duration_seconds, options.max_frame_count))
+        requested_frame_duration = options.max_frame_count / options.frames_per_second
+        end_seconds = min(metadata.duration_seconds, requested_frame_duration)
 
         if options.generate_frames:
-            frames_dir = self.derivatives_dir / "frames" / source_item.id
+            frames_dir = (
+                self.derivatives_dir
+                / "video_breakdowns"
+                / job_id
+                / source_item.id
+                / "frames"
+            )
             try:
                 frames = extract_frames(
                     video_path=source_item.raw_path,
@@ -152,7 +185,7 @@ class ProcessingService:
                     start_seconds=0.0,
                     end_seconds=end_seconds,
                     frames_per_second=options.frames_per_second,
-                )[: options.max_frame_count]
+                )
             except (RuntimeError, ValueError) as exc:
                 errors.append(
                     {
@@ -161,7 +194,7 @@ class ProcessingService:
                     }
                 )
             else:
-                for index, frame_path in enumerate(frames):
+                for index, frame_path in enumerate(frames[: options.max_frame_count]):
                     derived_items.append(
                         vault.build_derivative_media_item(
                             source_item=source_item,
@@ -182,7 +215,14 @@ class ProcessingService:
                     )
 
         if options.extract_audio:
-            audio_path = self.derivatives_dir / "audio" / source_item.id / "audio.wav"
+            audio_path = (
+                self.derivatives_dir
+                / "video_breakdowns"
+                / job_id
+                / source_item.id
+                / "audio"
+                / "audio.wav"
+            )
             try:
                 extract_audio(video_path=source_item.raw_path, output_path=audio_path)
             except RuntimeError as exc:

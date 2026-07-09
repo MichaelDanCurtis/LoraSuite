@@ -28,6 +28,35 @@ ffmpeg = pytest.mark.skipif(
 )
 
 
+def create_test_video(path: Path, *, duration_seconds: int = 2, rate: int = 4) -> Path:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size=32x32:rate={rate}:duration={duration_seconds}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={duration_seconds}",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return path
+
+
 def test_processing_job_serializes_derivative_outputs():
     derivative = MediaItem(
         source_id="source_1",
@@ -132,32 +161,7 @@ def test_vault_appends_derivative_media_items_without_new_source(tmp_path):
 
 @ffmpeg
 def test_video_breakdown_generates_frame_and_audio_derivatives(tmp_path):
-    source_video = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=size=32x32:rate=4:duration=2",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:duration=2",
-            "-shortest",
-            "-pix_fmt",
-            "yuv420p",
-            str(source_video),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    source_video = create_test_video(tmp_path / "source.mp4")
     vault = VaultService(tmp_path / "vault")
     source_item = vault.import_local_paths([source_video]).media_items[0]
     service = ProcessingService(tmp_path / "vault")
@@ -178,6 +182,69 @@ def test_video_breakdown_generates_frame_and_audio_derivatives(tmp_path):
     assert DerivativeType.AUDIO_CLIP in derivative_types
     assert all(item.raw_path.exists() for item in completed.derived_media_items)
     assert len(vault.list_media_items()) == 1 + len(completed.derived_media_items)
+    for derived_item in completed.derived_media_items:
+        assert derived_item.metadata_json["source_media_item_id"] == source_item.id
+        assert derived_item.metadata_json["derivative_type"] in {
+            DerivativeType.VIDEO_FRAME,
+            DerivativeType.AUDIO_CLIP,
+        }
+        assert "generator" in derived_item.metadata_json
+        assert "time_range" in derived_item.metadata_json
+
+
+@ffmpeg
+def test_video_breakdown_writes_only_manifested_frames(tmp_path):
+    source_video = create_test_video(tmp_path / "source.mp4")
+    vault = VaultService(tmp_path / "vault")
+    source_item = vault.import_local_paths([source_video]).media_items[0]
+    service = ProcessingService(tmp_path / "vault")
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(
+            extract_audio=False,
+            frames_per_second=4,
+            max_frame_count=2,
+        ),
+    )
+    completed = service.process_job(job.id)
+
+    frame_paths = [
+        item.raw_path
+        for item in completed.derived_media_items
+        if item.metadata_json["derivative_type"] == DerivativeType.VIDEO_FRAME
+    ]
+    assert completed.status == ProcessingJobStatus.COMPLETE
+    assert len(frame_paths) == 2
+    assert len(list(frame_paths[0].parent.glob("frame_*.png"))) == len(frame_paths)
+
+
+@ffmpeg
+def test_video_breakdown_reprocessing_same_source_uses_disjoint_derivative_paths(tmp_path):
+    source_video = create_test_video(tmp_path / "source.mp4")
+    vault = VaultService(tmp_path / "vault")
+    source_item = vault.import_local_paths([source_video]).media_items[0]
+    service = ProcessingService(tmp_path / "vault")
+
+    first_job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+    second_job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+
+    first_completed = service.process_job(first_job.id)
+    second_completed = service.process_job(second_job.id)
+
+    first_paths = {item.raw_path for item in first_completed.derived_media_items}
+    second_paths = {item.raw_path for item in second_completed.derived_media_items}
+    assert first_completed.status == ProcessingJobStatus.COMPLETE
+    assert second_completed.status == ProcessingJobStatus.COMPLETE
+    assert first_paths
+    assert second_paths
+    assert first_paths.isdisjoint(second_paths)
 
 
 def test_video_breakdown_fails_for_missing_source_media(tmp_path):
@@ -191,3 +258,33 @@ def test_video_breakdown_fails_for_missing_source_media(tmp_path):
 
     assert completed.status == ProcessingJobStatus.FAILED
     assert completed.errors[0]["code"] == "missing_source_media"
+
+
+def test_video_breakdown_fails_for_empty_source_media_list(tmp_path):
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[],
+        options=VideoBreakdownOptions(max_frame_count=1),
+    )
+
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[0]["code"] == "no_source_media"
+
+
+@ffmpeg
+def test_video_breakdown_fails_when_no_derivatives_requested(tmp_path):
+    source_video = create_test_video(tmp_path / "source.mp4")
+    vault = VaultService(tmp_path / "vault")
+    source_item = vault.import_local_paths([source_video]).media_items[0]
+    service = ProcessingService(tmp_path / "vault")
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(generate_frames=False, extract_audio=False),
+    )
+
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[0]["code"] == "no_derivatives_requested"
