@@ -309,6 +309,31 @@ def test_video_breakdown_deletes_unmanifested_overproduced_frames(tmp_path, monk
     assert len(list(frame_paths[0].parent.glob("frame_*.png"))) == len(frame_paths)
 
 
+def test_video_breakdown_fails_with_error_when_no_frames_are_extracted(
+    tmp_path,
+    monkeypatch,
+):
+    vault = VaultService(tmp_path / "vault")
+    source_item = create_fake_vault_video(vault, tmp_path / "source.mp4")
+    service = ProcessingService(tmp_path / "vault")
+
+    monkeypatch.setattr(
+        processing_module,
+        "probe_video",
+        lambda video_path: SimpleNamespace(duration_seconds=2.0),
+    )
+    monkeypatch.setattr(processing_module, "extract_frames", lambda **kwargs: [])
+
+    job = service.create_video_breakdown_job(
+        source_media_item_ids=[source_item.id],
+        options=VideoBreakdownOptions(extract_audio=False, max_frame_count=2),
+    )
+    completed = service.process_job(job.id)
+
+    assert completed.status == ProcessingJobStatus.FAILED
+    assert completed.errors[0]["code"] == "no_frames_extracted"
+
+
 @ffmpeg
 def test_process_job_returns_terminal_job_without_duplicate_manifest_rows(tmp_path):
     source_video = create_test_video(tmp_path / "source.mp4")

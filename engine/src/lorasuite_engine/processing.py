@@ -222,6 +222,14 @@ class ProcessingService:
                 for discarded_frame in frames[options.max_frame_count :]:
                     discarded_frame.unlink(missing_ok=True)
 
+                if not manifested_frames:
+                    errors.append(
+                        {
+                            "code": "no_frames_extracted",
+                            "message": "frame extraction did not produce any frames",
+                        }
+                    )
+
                 for index, frame_path in enumerate(manifested_frames):
                     derived_items.append(
                         vault.build_derivative_media_item(
