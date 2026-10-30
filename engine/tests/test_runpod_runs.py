@@ -341,3 +341,128 @@ def _mark_preflight_ready(service: RunPodTrainingRunService, bundle: Path, endpo
         checks=[{"id": "gpu", "passed": True, "detail": "ready"}],
     )
     service._write_preflight_reports({report.id: report})
+
+
+@pytest.mark.parametrize("initial_status", ["in_queue", "running"])
+@pytest.mark.parametrize("next_action", ["refresh", "cancel"])
+def test_polling_failure_remains_recoverable_after_restart(tmp_path, monkeypatch, initial_status, next_action):
+    from unittest.mock import Mock
+
+    bundle = _ready_bundle(tmp_path)
+    provider = FakeRunPodProvider()
+    service = RunPodTrainingRunService(tmp_path / "vault", provider_factory=lambda _: provider)
+    _mark_preflight_ready(service, bundle, "endpoint-1")
+    run = service.submit_run(service.create_run(bundle_path=bundle, endpoint_id="endpoint-1").id, "token")
+    if initial_status == "running":
+        service.refresh_run(run.id, "token")
+    original_status = provider.status
+    monkeypatch.setattr(provider, "status", Mock(side_effect=TimeoutError("temporary timeout")))
+
+    interrupted = service.refresh_run(run.id, "token")
+    assert interrupted.status == initial_status
+    assert interrupted.completed_at is None
+    assert interrupted.error == "temporary timeout"
+    assert interrupted.provider_job_id == "serverless-job-1"
+
+    restarted = RunPodTrainingRunService(tmp_path / "vault", provider_factory=lambda _: provider)
+    assert restarted.get_run(run.id).model_dump(mode="json") == interrupted.model_dump(mode="json")
+    monkeypatch.setattr(provider, "status", original_status)
+    if next_action == "cancel":
+        recovered = restarted.cancel_run(run.id, "token")
+        assert recovered.status == "canceled"
+        assert provider.canceled == [("endpoint-1", "serverless-job-1")]
+    else:
+        recovered = restarted.refresh_run(run.id, "token")
+        if recovered.status == "running":
+            recovered = restarted.refresh_run(run.id, "token")
+        assert recovered.status == "completed"
+        assert recovered.artifacts[0].kind == "checkpoint"
+    assert recovered.error is None
+    assert recovered.completed_at is not None
+
+
+@pytest.mark.parametrize("response", [{}, {"status": "IN_PROGRESS"}])
+def test_cancel_acknowledgment_waits_for_provider_confirmation(tmp_path, monkeypatch, response):
+    from unittest.mock import Mock
+
+    bundle = _ready_bundle(tmp_path)
+    provider = FakeRunPodProvider()
+    service = RunPodTrainingRunService(tmp_path / "vault", provider_factory=lambda _: provider)
+    _mark_preflight_ready(service, bundle, "endpoint-1")
+    run = service.submit_run(service.create_run(bundle_path=bundle, endpoint_id="endpoint-1").id, "token")
+    service.refresh_run(run.id, "token")
+    cancel = Mock(return_value=response)
+    monkeypatch.setattr(provider, "cancel", cancel)
+
+    pending = service.cancel_run(run.id, "token")
+    cancel.assert_called_once_with("endpoint-1", "serverless-job-1")
+    assert pending.status == "running"
+    assert pending.completed_at is None
+    assert "waiting for RunPod confirmation" in pending.progress_message
+    monkeypatch.setattr(provider, "status", Mock(return_value={"status": "CANCELLED"}))
+    confirmed = service.refresh_run(run.id, "token")
+    assert confirmed.status == "canceled"
+    assert confirmed.completed_at is not None
+
+
+def test_cancellation_failure_can_be_retried(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    bundle = _ready_bundle(tmp_path)
+    provider = FakeRunPodProvider()
+    service = RunPodTrainingRunService(tmp_path / "vault", provider_factory=lambda _: provider)
+    _mark_preflight_ready(service, bundle, "endpoint-1")
+    run = service.submit_run(service.create_run(bundle_path=bundle, endpoint_id="endpoint-1").id, "token")
+    cancel = Mock(side_effect=[TimeoutError("cancel timeout"), {"status": "CANCELLED"}])
+    monkeypatch.setattr(provider, "cancel", cancel)
+    uncertain = service.cancel_run(run.id, "token")
+    assert uncertain.status == "in_queue"
+    assert uncertain.completed_at is None
+    assert uncertain.error == "cancel timeout"
+    assert "not confirmed" in uncertain.progress_message
+    canceled = service.cancel_run(run.id, "token")
+    assert canceled.status == "canceled"
+    assert canceled.error is None
+    assert cancel.call_count == 2
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "canceled", "timed_out"])
+def test_cancel_preserves_terminal_run(tmp_path, status):
+    from lorasuite_engine.runpod_runs import RunPodTrainingRun
+    from unittest.mock import Mock
+
+    factory = Mock(side_effect=AssertionError("Terminal job must not contact provider"))
+    service = RunPodTrainingRunService(tmp_path, provider_factory=factory)
+    run = RunPodTrainingRun(bundle_path=tmp_path, bundle_fingerprint="fingerprint", modality="image",
+                            training_target_profile_id="profile", endpoint_id="endpoint", provider_job_id="job")
+    terminal = service._save(run, status=status, message="Provider terminal result", error="reason" if status == "failed" else None)
+    assert service.cancel_run(run.id, "token").model_dump(mode="json") == terminal.model_dump(mode="json")
+    factory.assert_not_called()
+
+
+def test_cancel_unsubmitted_run_does_not_contact_provider(tmp_path):
+    from unittest.mock import Mock
+
+    provider = Mock(side_effect=AssertionError("No job exists to cancel"))
+    service = RunPodTrainingRunService(tmp_path / "vault", provider_factory=provider)
+    run = service.create_run(bundle_path=_ready_bundle(tmp_path), endpoint_id="endpoint")
+    canceled = service.cancel_run(run.id, "token")
+    assert canceled.status == "canceled"
+    assert canceled.completed_at is not None
+    assert canceled.progress_message == "Canceled before submission to RunPod"
+    provider.assert_not_called()
+
+
+def test_cancel_that_races_with_completion_preserves_results(tmp_path, monkeypatch):
+    bundle = _ready_bundle(tmp_path)
+    provider = FakeRunPodProvider()
+    service = RunPodTrainingRunService(tmp_path / "vault", provider_factory=lambda _: provider)
+    _mark_preflight_ready(service, bundle, "endpoint-1")
+    run = service.submit_run(service.create_run(bundle_path=bundle, endpoint_id="endpoint-1").id, "token")
+    service.refresh_run(run.id, "token")
+    monkeypatch.setattr(provider, "cancel", provider.status)
+    finished = service.cancel_run(run.id, "token")
+    assert finished.status == "completed"
+    assert finished.artifacts[0].kind == "checkpoint"
+    assert finished.completed_at is not None
+    assert finished.error is None

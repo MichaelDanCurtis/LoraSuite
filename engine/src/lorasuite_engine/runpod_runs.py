@@ -403,45 +403,57 @@ class RunPodTrainingRunService:
             return self.submit_run(run_id, token)
         try:
             payload = self.provider_factory(token).status(run.endpoint_id, run.provider_job_id)
-            run.delay_time_ms = _optional_int(payload.get("delayTime"))
-            run.execution_time_ms = _optional_int(payload.get("executionTime"))
-            status = str(payload.get("status") or "").upper()
-            if status == "IN_QUEUE":
-                return self._save(run, status="in_queue", message=_progress(payload, "Waiting for a RunPod worker"))
-            if status in {"IN_PROGRESS", "RUNNING"}:
-                return self._save(run, status="running", message=_progress(payload, "Training on RunPod"))
-            if status == "COMPLETED":
-                output = payload.get("output")
-                if not isinstance(output, dict) or output.get("status") != "success":
-                    return self._save(run, status="failed", message="RunPod worker returned an invalid completion envelope", error=_error(payload))
-                if str(output.get("fingerprint") or "") != run.bundle_fingerprint:
-                    return self._save(run, status="failed", message="RunPod artifact provenance failed", error="Worker fingerprint does not match the submitted bundle")
-                if str(output.get("config_digest") or "") != run.config_digest:
-                    return self._save(run, status="failed", message="RunPod configuration provenance failed", error="Worker configuration digest does not match the submitted bundle")
-                run.artifacts = _artifacts(output)
-                run.completed_at = utc_now()
-                message = f"Training completed with {len(run.artifacts)} artifact(s)"
-                if not run.artifacts:
-                    message = "RunPod completed but returned no artifact contract"
-                return self._save(run, status="completed", message=message)
-            if status in {"CANCELLED", "CANCELED"}:
-                run.completed_at = utc_now()
-                return self._save(run, status="canceled", message="RunPod training canceled")
-            if status == "TIMED_OUT":
-                run.completed_at = utc_now()
-                return self._save(run, status="timed_out", message="RunPod training timed out", error=_error(payload))
-            if status == "FAILED":
-                return self._save(run, status="failed", message="RunPod training failed", error=_error(payload))
-            return self._save(run, message=f"RunPod status: {status.lower() or 'unknown'}")
+            return self._apply_provider_status(run, payload)
         except Exception as error:
-            return self._save(run, status="failed", message="RunPod status check failed", error=str(error))
+            # A failed observation says nothing about whether the paid job stopped.
+            return self._save(run, message="RunPod status check failed; refresh or cancel to retry", error=str(error))
+
+    def _apply_provider_status(self, run: RunPodTrainingRun, payload: dict[str, Any]) -> RunPodTrainingRun:
+        run.delay_time_ms = _optional_int(payload.get("delayTime"))
+        run.execution_time_ms = _optional_int(payload.get("executionTime"))
+        status = str(payload.get("status") or "").upper()
+        if status == "IN_QUEUE":
+            return self._save(run, status="in_queue", message=_progress(payload, "Waiting for a RunPod worker"))
+        if status in {"IN_PROGRESS", "RUNNING"}:
+            return self._save(run, status="running", message=_progress(payload, "Training on RunPod"))
+        if status == "COMPLETED":
+            output = payload.get("output")
+            if not isinstance(output, dict) or output.get("status") != "success":
+                return self._save(run, status="failed", message="RunPod worker returned an invalid completion envelope", error=_error(payload))
+            if str(output.get("fingerprint") or "") != run.bundle_fingerprint:
+                return self._save(run, status="failed", message="RunPod artifact provenance failed", error="Worker fingerprint does not match the submitted bundle")
+            if str(output.get("config_digest") or "") != run.config_digest:
+                return self._save(run, status="failed", message="RunPod configuration provenance failed", error="Worker configuration digest does not match the submitted bundle")
+            run.artifacts = _artifacts(output)
+            run.completed_at = utc_now()
+            message = f"Training completed with {len(run.artifacts)} artifact(s)"
+            if not run.artifacts:
+                message = "RunPod completed but returned no artifact contract"
+            return self._save(run, status="completed", message=message)
+        if status in {"CANCELLED", "CANCELED"}:
+            run.completed_at = utc_now()
+            return self._save(run, status="canceled", message="RunPod training canceled")
+        if status == "TIMED_OUT":
+            run.completed_at = utc_now()
+            return self._save(run, status="timed_out", message="RunPod training timed out", error=_error(payload))
+        if status == "FAILED":
+            return self._save(run, status="failed", message="RunPod training failed", error=_error(payload))
+        return self._save(run, message=f"RunPod status: {status.lower() or 'unknown'}")
 
     def cancel_run(self, run_id: str, token: str) -> RunPodTrainingRun:
         run = self._require(run_id)
-        if run.provider_job_id and run.status not in {"completed", "failed", "canceled", "timed_out"}:
-            self.provider_factory(token).cancel(run.endpoint_id, run.provider_job_id)
-        run.completed_at = utc_now()
-        return self._save(run, status="canceled", message="RunPod training canceled")
+        if run.status in {"completed", "failed", "canceled", "timed_out"}:
+            return run
+        if not run.provider_job_id:
+            return self._save(run, status="canceled", message="Canceled before submission to RunPod")
+        try:
+            payload = self.provider_factory(token).cancel(run.endpoint_id, run.provider_job_id)
+            if str(payload.get("status") or "").upper() in {"CANCELLED", "CANCELED", "COMPLETED", "FAILED", "TIMED_OUT"}:
+                return self._apply_provider_status(run, payload)
+            # An acknowledgment is not proof that the provider terminated the job.
+            return self._save(run, message="Cancellation requested; waiting for RunPod confirmation")
+        except Exception as error:
+            return self._save(run, message="RunPod cancellation not confirmed; refresh or cancel to retry", error=str(error))
 
     def download_artifacts(
         self,
@@ -516,8 +528,8 @@ class RunPodTrainingRunService:
             run.status = status
         if message is not None:
             run.progress_message = message
-        if error is not None:
-            run.error = error
+        run.error = error
+        if run.status in {"completed", "failed", "canceled", "timed_out"} and run.completed_at is None:
             run.completed_at = utc_now()
         run.updated_at = utc_now()
         runs[run.id] = run

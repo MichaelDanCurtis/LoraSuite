@@ -1,5 +1,4 @@
 import os
-import re
 import threading
 from contextlib import asynccontextmanager
 from datetime import date
@@ -46,6 +45,7 @@ from lorasuite_engine.improvement_loop import (
     ImprovementDecisionRequest,
     ImprovementLoopService,
 )
+from lorasuite_engine.local_origins import DESKTOP_ORIGINS, LOCAL_UI_PATTERN, is_local_ui_origin
 from lorasuite_engine.models import (
     AudioCleaningBatchOptions,
     AudioCleaningRecipe,
@@ -536,14 +536,8 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="LoraSuite Engine", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "tauri://localhost",
-            "http://tauri.localhost",
-            "https://tauri.localhost",
-        ],
-        allow_origin_regex=r"^http://(?:127\.0\.0\.1|localhost)(?::\d+)?$",
+        allow_origins=list(DESKTOP_ORIGINS),
+        allow_origin_regex=LOCAL_UI_PATTERN,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -562,7 +556,7 @@ def create_app(vault_root: Path | None = None) -> FastAPI:
         is_bridge = request.url.path.startswith("/library/")
         # CORS alone only prevents reading responses; reject cross-site writes
         # before handlers can act on the local filesystem or launch work.
-        local_origin = origin in {"tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"} or re.fullmatch(r"http://(?:127\.0\.0\.1|localhost)(?::\d+)?", origin)
+        local_origin = is_local_ui_origin(origin)
         if origin and not local_origin and not (is_bridge and EXTENSION.fullmatch(origin)):
             return Response("This engine accepts only local application origins", status_code=403)
         if EXTENSION.fullmatch(origin) and not is_bridge:
