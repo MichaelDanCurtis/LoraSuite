@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "LoraSuite Companion",
+  "version": "0.7.0",
+  "description": "See installed Civitai models, manage LM downloads and recipes, and capture references for LoraSuite.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://civitai.com/*",
+    "https://www.civitai.com/*",
+    "https://civitai.red/*",
+    "https://www.civitai.red/*",
+    "https://civarchive.com/*",
+    "https://www.civarchive.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Send to LoraSuite"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://civitai.com/*",
+        "https://www.civitai.com/*",
+        "https://civitai.red/*",
+        "https://www.civitai.red/*",
+        "https://civarchive.com/*",
+        "https://www.civarchive.com/*"
+      ],
+      "js": [
+        "overlay.js",
+        "civitai-button.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:*; img-src 'self' https://image.civitai.com"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup.html"
+      ],
+      "matches": [
+        "https://civitai.com/*",
+        "https://www.civitai.com/*",
+        "https://civitai.red/*",
+        "https://www.civitai.red/*",
+        "https://civarchive.com/*",
+        "https://www.civarchive.com/*"
+      ]
+    }
+  ]
+}

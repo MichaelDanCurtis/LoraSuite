@@ -1,0 +1,41 @@
+name: Source checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: source-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m venv engine/.venv
+          engine/.venv/bin/python -m pip install --upgrade 'pip>=26.2' 'setuptools>=84.1.0'
+          engine/.venv/bin/python -m pip install -e 'engine[dev]'
+          python -m pip install pip-audit
+      - name: Test and build
+        run: |
+          npm test
+          npm run engine:test
+          npm run build
+          npm audit --audit-level=moderate
+      - name: Audit engine dependencies
+        run: pip-audit --path "$(engine/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+      - name: Validate release contents
+        run: python scripts/package_public_release.py

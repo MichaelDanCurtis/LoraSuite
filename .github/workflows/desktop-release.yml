@@ -1,0 +1,275 @@
+name: Desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Build a signed, notarized draft release
+        type: boolean
+        default: false
+  push:
+    tags:
+      - desktop-v*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-macos-arm64:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Require an Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m venv engine/.venv
+          engine/.venv/bin/python -m pip install --upgrade pip
+          engine/.venv/bin/python -m pip install -e "engine[dev]"
+
+      - name: Test application contracts
+        run: |
+          npm test
+          npm run engine:test
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build local desktop bundle
+        run: npm run build:desktop
+
+      - name: Qualify local desktop bundle
+        run: npm run smoke:desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LoraSuite-macos-arm64-local
+          path: |
+            src-tauri/target/release/bundle/dmg/LoraSuite_*_aarch64.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  release-macos-arm64:
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || inputs.publish
+    needs: validate-macos-arm64
+    runs-on: macos-latest
+    timeout-minutes: 90
+    environment: desktop-release
+    env:
+      TAURI_ENV_TARGET_TRIPLE: aarch64-apple-darwin
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      LORASUITE_UPDATER_PUBLIC_KEY: ${{ secrets.LORASUITE_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Require an Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Require release credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$KEYCHAIN_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          test -n "$LORASUITE_UPDATER_PUBLIC_KEY"
+
+      - name: Resolve release metadata
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          desktop_version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          test "$package_version" = "$desktop_version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            release_tag="$GITHUB_REF_NAME"
+          else
+            release_tag="desktop-v$desktop_version"
+          fi
+          if [[ "$release_tag" != "desktop-v$desktop_version" ]]; then
+            printf 'Release tag %s does not match application version %s.\n' "$release_tag" "$desktop_version" >&2
+            exit 1
+          fi
+          printf 'RELEASE_VERSION=%s\n' "$desktop_version" >> "$GITHUB_ENV"
+          printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m venv engine/.venv
+          engine/.venv/bin/python -m pip install --upgrade pip
+          engine/.venv/bin/python -m pip install -e "engine[dev]"
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/lorasuite-release.p12"
+          keychain_path="$RUNNER_TEMP/lorasuite-build.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          signing_identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' |
+              head -1
+          )"
+          test -n "$signing_identity"
+          printf 'APPLE_SIGNING_IDENTITY=%s\n' "$signing_identity" >> "$GITHUB_ENV"
+
+      - name: Build signed embedded engine
+        run: npm run build:engine-sidecar
+
+      - name: Build and notarize desktop application
+        id: tauri
+        uses: tauri-apps/tauri-action@v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >-
+            --config src-tauri/tauri.release.conf.json
+            --target aarch64-apple-darwin
+
+      - name: Qualify signed and notarized bundle
+        run: |
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          app_path="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/LoraSuite.app"
+          dmg_path="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/LoraSuite_${version}_aarch64.dmg"
+          python3 scripts/smoke_desktop_bundle.py --app "$app_path" --dmg "$dmg_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep "TeamIdentifier=$APPLE_TEAM_ID"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -E "flags=.*runtime"
+          codesign -dv --verbose=4 "$app_path/Contents/MacOS/lorasuite-engine" 2>&1 |
+            grep "TeamIdentifier=$APPLE_TEAM_ID"
+          codesign -dv --verbose=4 "$app_path/Contents/MacOS/lorasuite-engine" 2>&1 |
+            grep -E "flags=.*runtime"
+          xcrun stapler validate "$app_path"
+          xcrun stapler validate "$dmg_path"
+          spctl --assess --type execute --verbose=4 "$app_path"
+
+      - name: Build signed update and rollback manifests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          asset_dir="$RUNNER_TEMP/lorasuite-release-assets"
+          mkdir -p "$asset_dir"
+          dmg="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/LoraSuite_${RELEASE_VERSION}_aarch64.dmg"
+          archive="$(find src-tauri/target/aarch64-apple-darwin/release/bundle -type f -name '*.app.tar.gz' -print -quit)"
+          test -n "$archive"
+          signature="$archive.sig"
+          test -f "$dmg"
+          test -f "$signature"
+          cp "$dmg" "$archive" "$signature" "$asset_dir/"
+
+          release_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          publish_date="$(git show -s --format=%cI "$GITHUB_SHA")"
+          python3 scripts/generate_update_manifests.py create \
+            --version "$RELEASE_VERSION" \
+            --archive "$asset_dir/$(basename "$archive")" \
+            --signature "$asset_dir/$(basename "$signature")" \
+            --base-url "$release_url" \
+            --pub-date "$publish_date" \
+            --notes "Signed and notarized Apple Silicon desktop release." \
+            --output "$asset_dir/latest.json"
+
+          previous_tag="$(
+            gh release list --limit 100 --json tagName,isDraft,isPrerelease,publishedAt \
+              --jq '[.[] | select((.isDraft | not) and (.isPrerelease | not) and (.tagName | startswith("desktop-v")))] | sort_by(.publishedAt) | reverse | .[0].tagName // ""'
+          )"
+          previous_manifest="$RUNNER_TEMP/previous-release/latest.json"
+          if [[ -n "$previous_tag" ]]; then
+            mkdir -p "$(dirname "$previous_manifest")"
+            gh release download "$previous_tag" \
+              --pattern latest.json \
+              --dir "$(dirname "$previous_manifest")" || true
+          fi
+          if [[ -f "$previous_manifest" ]]; then
+            python3 scripts/generate_update_manifests.py copy \
+              --source "$previous_manifest" \
+              --output "$asset_dir/rollback.json"
+          else
+            cp "$asset_dir/latest.json" "$asset_dir/rollback.json"
+          fi
+
+          (
+            cd "$asset_dir"
+            shasum -a 256 \
+              "$(basename "$dmg")" \
+              "$(basename "$archive")" \
+              "$(basename "$signature")" \
+              latest.json \
+              rollback.json > SHA256SUMS
+          )
+          printf 'RELEASE_ASSET_DIR=%s\n' "$asset_dir" >> "$GITHUB_ENV"
+
+      - name: Publish draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="LoraSuite Desktop v$RELEASE_VERSION"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              "$RELEASE_ASSET_DIR"/* \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "Signed, notarized, updater-ready Apple Silicon desktop candidate."
+          fi

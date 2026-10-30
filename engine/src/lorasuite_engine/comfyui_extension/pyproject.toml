@@ -1,0 +1,9 @@
+[project]
+name = "comfyui-lorasuite"
+version = "0.1.0"
+description = "Versioned LoraSuite artifact handoff nodes for ComfyUI"
+requires-python = ">=3.10"
+
+[tool.comfy]
+PublisherId = "lorasuite"
+DisplayName = "LoraSuite"
