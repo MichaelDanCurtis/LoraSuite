@@ -75,6 +75,19 @@ def test_instagram_helper_creates_video_poster_and_audio_candidates(tmp_path):
     assert video.metadata_json["audio_kind"] == "reused_or_music"
     assert video.metadata_json["audio_label"] == "Trending sound"
     assert audio_candidate.metadata_json["audio_original"] is False
+    assert video.metadata_json["source_bundle_key"] == "instagram:post:example"
+    assert poster_candidate.metadata_json["source_bundle_key"] == "instagram:post:example"
+    assert audio_candidate.metadata_json["source_bundle_key"] == "instagram:post:example"
+    assert len({candidate.id for candidate in result.candidates}) == 3
+
+    repeated = scan_instagram_helper_payload(
+        payload,
+        tmp_path / "vault",
+        include_video_posters_as_image_candidates=True,
+    )
+    assert [candidate.id for candidate in repeated.candidates] == [
+        candidate.id for candidate in result.candidates
+    ]
 
 
 def test_instagram_helper_caches_poster_data_url_without_persisting_data(tmp_path):

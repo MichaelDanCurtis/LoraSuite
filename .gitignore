@@ -14,3 +14,43 @@ src-tauri/target/
 .DS_Store
 .lorasuite/
 .serena/
+.lorasuite/build/
+src-tauri/binaries/
+
+# Machine-specific preview/desktop engine selection
+.env.local
+engine/build/
+
+# Private working material: never part of a source release.
+/.omc/
+/'/
+/archive/
+/docs/qualification/
+/docs/superpowers/
+/docs/*audit*.md
+/docs/lm-*.md
+/docs/implementation-status.md
+/docs/h3-native.md
+/docs/h3-scene-wizard.md
+/docs/h3-long-attention-fix.md
+/docs/lora-manager-integration-goal.md
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+*.sqlite
+*.sqlite3
+*.db
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+/release-artifacts/
+
+# Superseded internal planning notes; public guidance lives in README and docs.
+/docs/h3-lora-product-scope.md
+/docs/lora-manager-companion.md
+/docs/partner-integration.md
+/docs/roadmap.md

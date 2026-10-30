@@ -1,25 +1,35 @@
 {
   "name": "lorasuite",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:engine": "engine/.venv/bin/python -m uvicorn lorasuite_engine.main:app --app-dir engine/src --host 127.0.0.1 --port 8765 --reload",
+    "dev:engine": "node scripts/run_engine.mjs serve",
     "dev:all": "concurrently -k -n engine,tauri \"npm run dev:engine\" \"npm run tauri dev\"",
     "build": "tsc && vite build",
+    "build:engine-sidecar": "node scripts/run_engine.mjs build-sidecar",
+    "build:desktop": "npm run build:engine-sidecar && node scripts/build_desktop.mjs",
+    "smoke:desktop": "python3 scripts/smoke_desktop_bundle.py",
+    "smoke:desktop:lifecycle": "python3 scripts/smoke_desktop_bundle.py --lifecycle",
+    "smoke:engine-sidecar": "node scripts/run_engine.mjs smoke-sidecar",
+    "smoke:release": "node scripts/release_smoke.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
-    "engine:test": "engine/.venv/bin/python -m pytest engine/tests -q"
+    "engine:test": "node scripts/run_engine.mjs test",
+    "test:companion": "vitest run extensions/lorasuite-companion"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "lucide-react": "^0.468.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
@@ -36,5 +46,14 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
+  },
+  "license": "Apache-2.0",
+  "description": "Prepare reviewed LoRA datasets and hand them off to training and evaluation tools.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MichaelDanCurtis/LoraSuite.git"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -1,0 +1,106 @@
+name: Desktop cross-platform validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: LoraSuite-linux-x64-unsigned
+          - os: windows-latest
+            artifact: LoraSuite-windows-x64-unsigned
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            libsndfile1 \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            wget
+
+      - name: Install application dependencies
+        shell: bash
+        run: |
+          npm ci
+          python -m venv engine/.venv
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            engine_python="engine/.venv/Scripts/python.exe"
+          else
+            engine_python="engine/.venv/bin/python"
+          fi
+          "$engine_python" -m pip install --upgrade pip
+          "$engine_python" -m pip install -e "engine[dev]"
+
+      - name: Test application contracts
+        run: |
+          npm test
+          npm run engine:test
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build and smoke packaged engine
+        run: |
+          npm run build:engine-sidecar
+          npm run smoke:engine-sidecar
+
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: npm run tauri -- build --config src-tauri/tauri.local-release.conf.json --bundles appimage,deb
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: npm run tauri -- build --config src-tauri/tauri.local-release.conf.json --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: ${{ matrix.artifact }}
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7

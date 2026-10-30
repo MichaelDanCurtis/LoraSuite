@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LoraSuite Companion</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+<header class="brand-header"><span class="brand-mark" aria-hidden="true">✧</span><div><span class="eyebrow">COMPANION</span><h1>LoRA<span>Suite</span></h1></div><small id="companion-version"></small></header><p id="route-description">Checking this page…</p>
+<div class="connection-bar"><span class="connection-dot" aria-hidden="true"></span><p id="manager-status" role="status">Checking LoRA Manager…</p>
+<a id="open-manager" hidden target="_blank" rel="noopener noreferrer">Open LM ↗</a></div>
+
+<button id="open-companion-tab" hidden>Open companion popup</button>
+<section id="model-preview" class="preview-card" hidden aria-label="Selected item">
+<div class="preview-art"><div class="preview-fallback" aria-hidden="true"><span>✧</span><small>LoRA Suite</small></div><img id="preview-image" alt="Selected item preview" referrerpolicy="no-referrer" hidden></div>
+<div class="preview-copy"><span id="preview-kind" class="eyebrow">MODEL</span><h2 id="preview-title">Your next creation</h2><p id="model-identity"></p><p id="recipe-identity"></p></div>
+</section>
+<section id="model-handoff" hidden aria-label="Civitai to LoRA Manager">
+<div class="section-heading"><h2>Add to your library</h2><span class="eyebrow">CIVITAI → LM</span></div>
+<button id="load-versions" data-manager>Check available versions</button>
+<label>Version<select id="model-version"><option value="">Load versions first</option></select></label>
+<button class="primary" id="download-model" data-manager disabled>Download selected version</button>
+<p>Keep this page and LoRA Manager open until transfers finish. You can dismiss and reopen this popup.</p>
+<details><summary>Files, destination &amp; source</summary><p id="model-url"></p>
+<label>Library category<select id="model-category"><option value="loras">LoRA adapter</option><option value="checkpoints">Checkpoint</option><option value="embeddings">Embedding</option></select></label>
+<button id="review-model" data-manager>Review download in LoRA Manager</button>
+<p>Opens its download wizard with the source URL filled in. Use this for non-default files, destinations or access requirements.</p></details>
+</section>
+<section id="recipe-handoff" hidden aria-label="Image recipe import">
+<h2>Save a little inspiration</h2>
+<p>LoRA Manager imports the image and available generation metadata. Review the discovered resources below before downloading any missing models.</p>
+<button class="primary" id="import-recipe" data-manager>Import recipe into LoRA Manager</button>
+<div id="recipe-resources"></div><button id="download-resources" data-manager disabled>Download selected missing resources</button>
+</section>
+<section id="download-panel" aria-label="LoRA Manager downloads">
+<div class="section-heading"><h2>Downloads</h2><button id="refresh-downloads" class="text-button" data-manager aria-label="Refresh downloads">↻ Refresh</button></div>
+<div id="download-list">Refresh to see LoRA Manager’s queue and recent history.</div>
+</section>
+<details id="manager-connection"><summary>Connect to LoRA Manager</summary>
+<p>Use LM running on its own or inside ComfyUI. No LoraSuite pairing is needed.</p>
+<label>LoRA Manager address<input id="manager-address" value="http://127.0.0.1:8188"></label>
+<button id="find-manager">Find LoRA Manager</button><button id="connect-manager">Save and connect</button>
+<label id="manager-choices-label" hidden>Choose your library<select id="manager-choices"></select></label>
+<p>The default is your ComfyUI LoRA Manager on port 8188. LM must remain running. A copy started by LoraSuite stops when that desktop app exits; use standalone LM or ComfyUI for independent browsing.</p>
+</details>
+<details id="quick-capture" hidden aria-label="Quick website capture">
+<summary>Project capture <span class="optional">Optional</span></summary>
+<p id="connection-status" role="status"></p>
+<details id="connection"><summary>Connect LoraSuite for project capture</summary>
+<p>Only needed for project capture. Open LoraSuite → Model Library → Pair Chrome extension, then enter its code below.</p>
+<button id="find-engine">Find running LoraSuite</button>
+<label id="engine-choices-label" hidden>Choose the app you are using<select id="engine-choices"></select></label>
+<label>Engine address<input id="engine" value="http://127.0.0.1:8766"></label>
+<label>One-time code<input id="code" type="password" autocomplete="off"></label>
+<button id="pair">Pair</button><button id="disconnect">Forget connection</button>
+<p>Codes expire in two minutes. Pairing is remembered in this Chrome profile; no Civitai login or cookies are transferred.</p></details>
+
+<button id="load-projects" data-paired>Load LoraSuite projects</button>
+<label>Project<select id="project"><option value="">Connect first</option></select></label>
+<label>Intended use<select id="output"><option value="image">Image LoRA</option><option value="video">Video LoRA / H3</option><option value="voice">Voice (requires separate confirmation)</option><option value="id_lora">Living Identity</option></select></label>
+<button id="scan" data-paired>Find media and model references</button>
+<button id="save-page" data-paired hidden>Save page to project review</button>
+<section id="items" aria-label="Review selected references"></section>
+<button id="send" data-paired disabled>Send selected to review</button>
+</details>
+<p id="status" role="status" aria-live="polite">Ready.</p>
+<p id="last-handoff"></p>
+<details class="privacy-note"><summary>About captured references</summary><p class="note">URLs are saved without credentials or fragments. Only numeric model-version and common thread/page identifiers are kept from queries. Signed webpage URLs and blob streams need manual handling. Civitai download credentials stay in LoRA Manager. A model listing does not establish H3 compatibility.</p></details>
+<script type="module" src="popup.js"></script></body></html>

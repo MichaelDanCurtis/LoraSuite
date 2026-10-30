@@ -8,7 +8,7 @@ import wave
 import pytest
 
 import lorasuite_engine.ffmpeg as ffmpeg_module
-from lorasuite_engine.ffmpeg import extract_audio, extract_frames, probe_video
+from lorasuite_engine.ffmpeg import extract_audio, extract_frames, normalize_training_video, probe_video
 
 
 ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
@@ -16,6 +16,51 @@ ffmpeg_probe = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="FFmpeg or ffprobe is not installed",
 )
+
+
+@ffmpeg_probe
+def test_media_preparation_finds_tools_with_desktop_path(tmp_path, monkeypatch):
+    source = tmp_path / "desktop-source.mp4"
+    subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=24:duration=1", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(source)], check=True)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert probe_video(source).width == 32
+    assert extract_audio(source, tmp_path / "audio.wav").stat().st_size > 0
+
+
+def test_media_tools_extend_path_without_mutating_parent(monkeypatch):
+    monkeypatch.setenv("PATH", "/custom/tools")
+    def run(command, **kwargs):
+        assert kwargs["env"]["PATH"].startswith("/custom/tools")
+        assert "/opt/homebrew/bin" in kwargs["env"]["PATH"]
+        assert "/usr/local/bin" in kwargs["env"]["PATH"]
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", run)
+    ffmpeg_module._run_ffmpeg_command(["ffprobe", "-version"])
+    assert ffmpeg_module.os.environ["PATH"] == "/custom/tools"
+
+
+@ffmpeg_probe
+def test_normalize_training_video_writes_silent_even_h264_clip(tmp_path: Path):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "normalized.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=720x1280:rate=24:duration=1",
+            "-pix_fmt", "yuv420p", str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    normalize_training_video(source, output, fps=16, max_dimension=512)
+
+    metadata = probe_video(output)
+    assert metadata.fps == pytest.approx(16)
+    assert max(metadata.width, metadata.height) <= 512
+    assert metadata.width % 2 == 0
+    assert metadata.height % 2 == 0
 
 
 @ffmpeg

@@ -1,5 +1,6 @@
 import json
 import ssl
+from datetime import date, datetime, timezone
 from http.cookiejar import CookieJar
 from io import BytesIO
 from pathlib import Path
@@ -69,6 +70,59 @@ def test_instagram_browser_scan_caches_thumbnail_candidates(tmp_path):
     assert video.metadata_json["browser_source"] == "chrome"
 
 
+def test_instagram_browser_scan_filters_posts_before_fetching_thumbnails(tmp_path):
+    fetched_thumbnails: list[str] = []
+
+    def fake_metadata(_url: str, _browser: str) -> dict:
+        return {
+            "entries": [
+                {
+                    "id": "inside",
+                    "title": "inside range",
+                    "webpage_url": "https://www.instagram.com/p/inside/",
+                    "thumbnail": "https://cdninstagram.example/inside.jpg",
+                    "timestamp": datetime(2025, 6, 1, tzinfo=timezone.utc).timestamp(),
+                },
+                {
+                    "id": "too_old",
+                    "title": "too old",
+                    "webpage_url": "https://www.instagram.com/p/old/",
+                    "thumbnail": "https://cdninstagram.example/old.jpg",
+                    "timestamp": datetime(2023, 6, 1, tzinfo=timezone.utc).timestamp(),
+                },
+            ]
+        }
+
+    def fake_thumbnail(url: str) -> tuple[bytes, str]:
+        fetched_thumbnails.append(url)
+        return jpeg_bytes(), "image/jpeg"
+
+    result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/p/range/",
+        tmp_path / "vault",
+        metadata_extractor=fake_metadata,
+        thumbnail_fetcher=fake_thumbnail,
+        date_from=date(2025, 1, 1),
+        date_to=date(2025, 12, 31),
+    )
+
+    assert fetched_thumbnails == ["https://cdninstagram.example/inside.jpg"]
+    assert [candidate.display_name for candidate in result.candidates] == ["inside range"]
+    assert result.candidates[0].metadata_json["posted_at"].startswith("2025-06-01")
+
+
+def test_instagram_date_filter_rejects_inverted_range(tmp_path):
+    with pytest.raises(InstagramBrowserScanError, match="start date"):
+        scan_instagram_url_with_browser_cookies(
+            "https://www.instagram.com/p/range/",
+            tmp_path / "vault",
+            metadata_extractor=lambda _url, _browser: {},
+            thumbnail_fetcher=lambda _url: (jpeg_bytes(), "image/jpeg"),
+            date_from=date(2026, 1, 1),
+            date_to=date(2025, 1, 1),
+        )
+
+
 def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp_path):
     profile_calls: list[tuple[str, str]] = []
     calls: list[tuple[str, str, int, str | None]] = []
@@ -115,6 +169,10 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
                         "id": "3758183871762427742_33827583",
                         "code": "DQnwFHVAG9e",
                         "caption": {"text": "first reel caption"},
+                        "user": {
+                            "username": "marysuecurtis",
+                            "full_name": "Mary Sue Curtis",
+                        },
                         "media_type": 2,
                         "original_width": 720,
                         "original_height": 1280,
@@ -216,6 +274,10 @@ def test_instagram_browser_scan_reads_profile_reels_tab_with_browser_cookies(tmp
     assert Path(video.poster_asset_path).exists()
     assert video.metadata_json["browser_source"] == "chrome"
     assert video.metadata_json["extractor"] == "instagram-web-api"
+    assert video.metadata_json["scan_surface"] == "reels"
+    assert video.metadata_json["owner_username"] == "marysuecurtis"
+    assert video.metadata_json["uploader_username"] == "marysuecurtis"
+    assert video.metadata_json["uploader_display_name"] == "Mary Sue Curtis"
     assert video.metadata_json["download_url"] == "https://cdninstagram.example/reel-large.mp4"
     assert poster.media_type == MediaType.IMAGE
     assert poster.selected is True
@@ -591,6 +653,117 @@ def test_instagram_profile_all_scan_combines_feed_reels_and_tagged(tmp_path):
     }
 
 
+def test_instagram_profile_all_scan_continues_when_one_surface_fails(tmp_path):
+    def fake_profile_page(
+        _username: str,
+        _browser: str,
+        _page_size: int,
+        _cursor: str | None,
+    ) -> dict:
+        return {
+            "items": [
+                {
+                    "id": "feed_photo_1",
+                    "code": "FEED1",
+                    "media_type": 8,
+                    "caption": {"text": "feed photo"},
+                    "image_versions2": {
+                        "candidates": [
+                            {"url": "https://cdninstagram.example/feed.jpg"}
+                        ]
+                    },
+                }
+            ],
+            "more_available": False,
+        }
+
+    def fake_profile_reels(
+        _username: str,
+        _browser: str,
+        _page_size: int,
+        _cursor: str | None,
+    ) -> dict:
+        raise InstagramBrowserScanError("Instagram request failed with HTTP 401.")
+
+    def fake_profile_tagged(
+        _username: str,
+        _browser: str,
+        _page_size: int,
+        _cursor: str | None,
+    ) -> dict:
+        return {
+            "data": {
+                "user": {
+                    "edge_user_to_photos_of_you": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "id": "tagged_photo_1",
+                                    "shortcode": "TAG1",
+                                    "display_url": "https://cdninstagram.example/tagged.jpg",
+                                    "dimensions": {"width": 1080, "height": 1350},
+                                    "is_video": False,
+                                    "edge_media_to_caption": {
+                                        "edges": [{"node": {"text": "tagged photo"}}]
+                                    },
+                                }
+                            }
+                        ],
+                        "page_info": {"has_next_page": False},
+                    }
+                }
+            }
+        }
+
+    def fake_thumbnail(_url: str) -> tuple[bytes, str]:
+        return jpeg_bytes(), "image/jpeg"
+
+    result = scan_instagram_url_with_browser_cookies(
+        "https://www.instagram.com/marysuecurtis/reels/",
+        tmp_path / "vault",
+        browser="chrome",
+        limit=4,
+        scan_mode="all",
+        profile_page_fetcher=fake_profile_page,
+        profile_reels_fetcher=fake_profile_reels,
+        profile_tagged_fetcher=fake_profile_tagged,
+        thumbnail_fetcher=fake_thumbnail,
+    )
+
+    assert [candidate.display_name for candidate in result.candidates] == [
+        "feed photo",
+        "tagged photo",
+    ]
+    assert result.errors == [
+        {
+            "code": "instagram_surface_error",
+            "surface": "reels",
+            "message": "Instagram request failed with HTTP 401.",
+        }
+    ]
+    assert result.metadata_json["failed_scan_surfaces"] == ["reels"]
+
+
+def test_instagram_profile_single_surface_scan_still_fails_on_surface_error(tmp_path):
+    def fake_profile_reels(
+        _username: str,
+        _browser: str,
+        _page_size: int,
+        _cursor: str | None,
+    ) -> dict:
+        raise InstagramBrowserScanError("Instagram request failed with HTTP 401.")
+
+    with pytest.raises(InstagramBrowserScanError, match="HTTP 401"):
+        scan_instagram_url_with_browser_cookies(
+            "https://www.instagram.com/marysuecurtis/reels/",
+            tmp_path / "vault",
+            browser="chrome",
+            limit=4,
+            scan_mode="reels",
+            profile_reels_fetcher=fake_profile_reels,
+        )
+
+
 def test_instagram_profile_reels_scan_target_pages_reels_only(tmp_path):
     calls: list[tuple[str, str, int, str | None]] = []
 
@@ -848,3 +1021,26 @@ def test_thumbnail_fetch_uses_engine_ssl_context(monkeypatch):
     assert content_type == "image/jpeg"
     assert seen["timeout"] == 30
     assert isinstance(seen["context"], ssl.SSLContext)
+
+
+def test_instagram_dedupe_merges_surface_membership_across_id_and_url_variants():
+    feed_item = {
+        "id": "123456_987",
+        "source_url": "https://www.instagram.com/p/ABC123/",
+        "scan_surface": "feed",
+    }
+    reel_item = {
+        "id": "123456",
+        "source_url": "https://www.instagram.com/reel/ABC123/?utm_source=test",
+        "scan_surface": "reels",
+    }
+    tagged_item = {
+        "id": "tagged-alias",
+        "source_url": "https://www.instagram.com/p/ABC123/",
+        "scan_surface": "tagged",
+    }
+
+    result = instagram_browser._dedupe_media_items([feed_item, reel_item, tagged_item])
+
+    assert result == [feed_item]
+    assert feed_item["scan_surfaces"] == ["feed", "reels", "tagged"]

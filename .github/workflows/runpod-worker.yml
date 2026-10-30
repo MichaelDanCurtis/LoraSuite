@@ -1,0 +1,53 @@
+name: Publish RunPod worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: runpod-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize registry owner
+        run: echo "REGISTRY_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - name: Compute worker contract digest
+        id: contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$({ find workers/runpod -type f -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-16)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Validate worker image contract
+        run: docker buildx build --platform linux/amd64 --check -f workers/runpod/Dockerfile workers/runpod
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: workers/runpod
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ghcr.io/${{ env.REGISTRY_OWNER }}/lorasuite-runpod-worker:worker-${{ steps.contract.outputs.digest }}
+            ghcr.io/${{ env.REGISTRY_OWNER }}/lorasuite-runpod-worker:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Publish deployment coordinates
+        run: |
+          echo "### RunPod worker" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lorasuite-runpod-worker:worker-${{ steps.contract.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

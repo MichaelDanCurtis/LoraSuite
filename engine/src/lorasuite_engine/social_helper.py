@@ -11,6 +11,10 @@ from lorasuite_engine.models import (
     MediaType,
     SourceKind,
 )
+from lorasuite_engine.media_identity import (
+    canonical_identity_metadata,
+    deterministic_candidate_id,
+)
 
 TOKEN_LIKE_KEYS = frozenset(
     {"authorization", "cookie", "cookies", "csrf", "session", "token", "x-csrftoken"}
@@ -29,17 +33,37 @@ def scan_instagram_helper_payload(
     include_video_posters_as_image_candidates: bool = True,
     include_video_audio_as_audio_candidates: bool = True,
 ) -> IngressScanResult:
+    return scan_social_helper_payload(
+        payload,
+        vault_root,
+        source_kind=SourceKind.INSTAGRAM,
+        include_video_posters_as_image_candidates=include_video_posters_as_image_candidates,
+        include_video_audio_as_audio_candidates=include_video_audio_as_audio_candidates,
+    )
+
+
+def scan_social_helper_payload(
+    payload: dict[str, Any],
+    vault_root: Path,
+    *,
+    source_kind: SourceKind,
+    include_video_posters_as_image_candidates: bool = True,
+    include_video_audio_as_audio_candidates: bool = True,
+) -> IngressScanResult:
     reject_token_like_fields(payload)
     result = IngressScanResult()
     helper_version = str(payload.get("helper_version") or "unknown")
 
     for item in payload.get("media", []):
-        candidate = _candidate_from_item(item, Path(vault_root), helper_version)
+        candidate = _candidate_from_item(item, Path(vault_root), helper_version, source_kind)
         result.candidates.append(candidate)
         if (
             include_video_posters_as_image_candidates
             and candidate.media_type == MediaType.VIDEO
-            and candidate.poster_asset_path is not None
+            and (
+                candidate.poster_asset_path is not None
+                or source_kind == SourceKind.X_TWITTER
+            )
         ):
             result.candidates.append(_poster_candidate(candidate))
         if include_video_audio_as_audio_candidates and candidate.media_type == MediaType.VIDEO:
@@ -66,14 +90,36 @@ def _candidate_from_item(
     item: Mapping[str, Any],
     vault_root: Path,
     helper_version: str,
+    source_kind: SourceKind,
 ) -> IngressCandidate:
     media_id = str(item["id"])
     media_type = MediaType(str(item["media_type"]))
     poster_path = _cache_preview_asset(item, vault_root, media_id)
     source_url = str(item.get("source_url") or "")
 
+    metadata = {
+        "platform_media_id": media_id,
+        "source_url": source_url,
+        "helper_version": helper_version,
+        "download_url": item.get("download_url"),
+        "poster_source_path": item.get("poster_path") or item.get("thumbnail_path"),
+        "poster_source_url": item.get("poster_url") or item.get("thumbnail_url"),
+        "browser_source": item.get("browser_source"),
+        "extractor": item.get("extractor"),
+        **_source_metadata_from_item(item),
+        **_audio_metadata_from_item(item),
+    }
+    metadata.update(
+        canonical_identity_metadata(source_kind, metadata, source_url or media_id, media_type)
+    )
     return IngressCandidate(
-        source_kind=SourceKind.INSTAGRAM,
+        id=deterministic_candidate_id(
+            source_kind,
+            metadata,
+            source_url or media_id,
+            media_type,
+        ),
+        source_kind=source_kind,
         source_locator=source_url or media_id,
         display_name=str(item.get("display_name") or media_id),
         media_type=media_type,
@@ -84,25 +130,42 @@ def _candidate_from_item(
         poster_asset_path=poster_path if media_type == MediaType.VIDEO else None,
         status=IngressCandidateStatus.READY,
         selected=media_type == MediaType.IMAGE,
-        metadata_json={
-            "platform_media_id": media_id,
-            "source_url": source_url,
-            "helper_version": helper_version,
-            "download_url": item.get("download_url"),
-            "poster_source_path": item.get("poster_path") or item.get("thumbnail_path"),
-            "poster_source_url": item.get("poster_url") or item.get("thumbnail_url"),
-            "browser_source": item.get("browser_source"),
-            "extractor": item.get("extractor"),
-            **_audio_metadata_from_item(item),
-        },
+        metadata_json=metadata,
     )
 
 
 def _poster_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
     poster_path = video_candidate.poster_asset_path
+    source_locator = (
+        str(poster_path)
+        if poster_path is not None
+        else f"{video_candidate.source_locator}#poster"
+    )
+    local_import_path = str(poster_path) if poster_path is not None else None
+    metadata = {
+        **video_candidate.metadata_json,
+        "source_video_candidate_id": video_candidate.id,
+        "local_import_path": local_import_path,
+        "asset_role": "video_poster",
+        "materialize_from_video": poster_path is None,
+    }
+    metadata.update(
+        canonical_identity_metadata(
+            video_candidate.source_kind,
+            metadata,
+            source_locator,
+            MediaType.IMAGE,
+        )
+    )
     return IngressCandidate(
-        source_kind=SourceKind.INSTAGRAM,
-        source_locator=str(poster_path),
+        id=deterministic_candidate_id(
+            video_candidate.source_kind,
+            metadata,
+            source_locator,
+            MediaType.IMAGE,
+        ),
+        source_kind=video_candidate.source_kind,
+        source_locator=source_locator,
         display_name=f"{video_candidate.display_name} poster",
         media_type=MediaType.IMAGE,
         width=video_candidate.width,
@@ -110,30 +173,41 @@ def _poster_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
         thumbnail_path=poster_path,
         status=IngressCandidateStatus.READY,
         selected=True,
-        metadata_json={
-            **video_candidate.metadata_json,
-            "source_video_candidate_id": video_candidate.id,
-            "local_import_path": str(poster_path),
-            "asset_role": "video_poster",
-        },
+        metadata_json=metadata,
     )
 
 
 def _audio_candidate(video_candidate: IngressCandidate) -> IngressCandidate:
+    source_locator = f"{video_candidate.source_locator}#audio"
+    metadata = {
+        **video_candidate.metadata_json,
+        "source_video_candidate_id": video_candidate.id,
+        "asset_role": "video_audio",
+    }
+    metadata.update(
+        canonical_identity_metadata(
+            video_candidate.source_kind,
+            metadata,
+            source_locator,
+            MediaType.AUDIO,
+        )
+    )
     return IngressCandidate(
-        source_kind=SourceKind.INSTAGRAM,
-        source_locator=f"{video_candidate.source_locator}#audio",
+        id=deterministic_candidate_id(
+            video_candidate.source_kind,
+            metadata,
+            source_locator,
+            MediaType.AUDIO,
+        ),
+        source_kind=video_candidate.source_kind,
+        source_locator=source_locator,
         display_name=f"{video_candidate.display_name} voice",
         media_type=MediaType.AUDIO,
         duration=video_candidate.duration,
         thumbnail_path=video_candidate.poster_asset_path,
         status=IngressCandidateStatus.READY,
         selected=False,
-        metadata_json={
-            **video_candidate.metadata_json,
-            "source_video_candidate_id": video_candidate.id,
-            "asset_role": "video_audio",
-        },
+        metadata_json=metadata,
     )
 
 
@@ -151,6 +225,24 @@ def _audio_metadata_from_item(item: Mapping[str, Any]) -> dict[str, Any]:
         if value is not None:
             audio_metadata[key] = value
     return audio_metadata
+
+
+def _source_metadata_from_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    source_metadata: dict[str, Any] = {}
+    for key in (
+        "scan_surface",
+        "scan_surfaces",
+        "owner_username",
+        "uploader_username",
+        "uploader_display_name",
+        "uploader_id",
+        "posted_at",
+        "posted_timestamp",
+    ):
+        value = item.get(key)
+        if value is not None:
+            source_metadata[key] = value
+    return source_metadata
 
 
 def _cache_preview_asset(

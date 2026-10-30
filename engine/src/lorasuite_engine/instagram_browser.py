@@ -2,6 +2,7 @@ import json
 import ssl
 import subprocess
 import sys
+from datetime import date, datetime, timezone
 from binascii import Error as BinasciiError
 from base64 import b64decode, b64encode
 from collections.abc import Callable
@@ -21,6 +22,11 @@ from yt_dlp.cookies import extract_cookies_from_browser
 
 from lorasuite_engine.models import IngressScanResult
 from lorasuite_engine.social_helper import scan_instagram_helper_payload
+from lorasuite_engine.social_resilience import (
+    SocialProviderError,
+    error_from_http,
+    error_from_url,
+)
 
 MetadataExtractor = Callable[[str, str], dict[str, Any]]
 ProfileFetcher = Callable[[str, str], dict[str, Any]]
@@ -45,8 +51,8 @@ WEB_USER_AGENT = (
 )
 
 
-class InstagramBrowserScanError(RuntimeError):
-    pass
+class InstagramBrowserScanError(SocialProviderError):
+    provider = "instagram"
 
 
 def scan_instagram_url_with_browser_cookies(
@@ -63,11 +69,14 @@ def scan_instagram_url_with_browser_cookies(
     limit: int = PROFILE_REELS_PAGE_SIZE,
     cursor: str | None = None,
     scan_mode: InstagramScanMode = "all",
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> IngressScanResult:
     normalized_url = _validate_instagram_url(url)
     normalized_browser = _validate_browser(browser)
     scan_limit = _validate_scan_limit(limit)
     normalized_scan_mode = _validate_scan_mode(scan_mode)
+    _validate_date_range(date_from, date_to)
     cursor_state = _decode_scan_cursor(cursor)
     extractor = metadata_extractor or _extract_metadata_with_ytdlp
     profile_fetcher_impl = profile_fetcher or _fetch_profile_with_browser_cookies
@@ -89,6 +98,8 @@ def scan_instagram_url_with_browser_cookies(
             profile_reels_fetcher=reels_fetcher,
             profile_tagged_fetcher=tagged_fetcher,
             thumbnail_fetcher=fetcher,
+            date_from=date_from,
+            date_to=date_to,
         )
     else:
         metadata = extractor(normalized_url, normalized_browser)
@@ -96,6 +107,8 @@ def scan_instagram_url_with_browser_cookies(
             metadata,
             browser=normalized_browser,
             thumbnail_fetcher=fetcher,
+            date_from=date_from,
+            date_to=date_to,
         )
     return scan_instagram_helper_payload(payload, vault_root)
 
@@ -113,68 +126,114 @@ def _scan_instagram_profile_surfaces(
     profile_reels_fetcher: ProfileReelsFetcher,
     profile_tagged_fetcher: ProfileTaggedFetcher,
     thumbnail_fetcher: ThumbnailFetcher,
+    date_from: date | None,
+    date_to: date | None,
 ) -> IngressScanResult:
     is_continuation = bool(cursor_state)
     payload_media: list[dict[str, Any]] = []
     metadata_by_surface: dict[str, dict[str, Any]] = {}
+    surface_errors: list[dict[str, str]] = []
 
     if _should_fetch_surface(scan_mode, "feed", cursor_state, is_continuation):
-        profile_metadata = _fetch_feed_surface(
-            username,
-            browser,
-            limit,
-            cursor_state.get("feed") or cursor_state.get("profile"),
-            profile_fetcher=profile_fetcher,
-            profile_page_fetcher=profile_page_fetcher,
-        )
-        metadata_by_surface["feed"] = profile_metadata
-        feed_payload = _helper_payload_from_instagram_profile_payload(
-            profile_metadata,
-            {"items": []},
-            browser=browser,
-            thumbnail_fetcher=thumbnail_fetcher,
-            limit=limit,
-        )
-        payload_media.extend(feed_payload["media"])
+        try:
+            profile_metadata = _fetch_feed_surface(
+                username,
+                browser,
+                limit,
+                cursor_state.get("feed") or cursor_state.get("profile"),
+                profile_fetcher=profile_fetcher,
+                profile_page_fetcher=profile_page_fetcher,
+            )
+            metadata_by_surface["feed"] = profile_metadata
+            feed_payload = _helper_payload_from_instagram_profile_payload(
+                profile_metadata,
+                {"items": []},
+                browser=browser,
+                thumbnail_fetcher=thumbnail_fetcher,
+                limit=limit,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            _annotate_profile_surface_media(
+                feed_payload["media"],
+                scan_surface="feed",
+                owner_username=username,
+            )
+            payload_media.extend(feed_payload["media"])
+        except InstagramBrowserScanError as error:
+            _handle_profile_surface_error(scan_mode, "feed", error, surface_errors)
 
     if _should_fetch_surface(scan_mode, "reels", cursor_state, is_continuation):
-        reels_metadata = profile_reels_fetcher(
-            username,
-            browser,
-            limit,
-            cursor_state.get("reels"),
-        )
-        metadata_by_surface["reels"] = reels_metadata
-        reels_payload = _helper_payload_from_instagram_clips_payload(
-            reels_metadata,
-            browser=browser,
-            thumbnail_fetcher=thumbnail_fetcher,
-        )
-        payload_media.extend(reels_payload["media"])
+        try:
+            reels_metadata = profile_reels_fetcher(
+                username,
+                browser,
+                limit,
+                cursor_state.get("reels"),
+            )
+            metadata_by_surface["reels"] = reels_metadata
+            reels_payload = _helper_payload_from_instagram_clips_payload(
+                reels_metadata,
+                browser=browser,
+                thumbnail_fetcher=thumbnail_fetcher,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            _annotate_profile_surface_media(
+                reels_payload["media"],
+                scan_surface="reels",
+                owner_username=username,
+            )
+            payload_media.extend(reels_payload["media"])
+        except InstagramBrowserScanError as error:
+            _handle_profile_surface_error(scan_mode, "reels", error, surface_errors)
 
     if _should_fetch_surface(scan_mode, "tagged", cursor_state, is_continuation):
-        tagged_metadata = profile_tagged_fetcher(
-            username,
-            browser,
-            limit,
-            cursor_state.get("tagged"),
-        )
-        metadata_by_surface["tagged"] = tagged_metadata
-        tagged_payload = _helper_payload_from_instagram_profile_payload(
-            tagged_metadata,
-            {"items": []},
-            browser=browser,
-            thumbnail_fetcher=thumbnail_fetcher,
-            limit=limit,
-        )
-        payload_media.extend(tagged_payload["media"])
+        try:
+            tagged_metadata = profile_tagged_fetcher(
+                username,
+                browser,
+                limit,
+                cursor_state.get("tagged"),
+            )
+            metadata_by_surface["tagged"] = tagged_metadata
+            tagged_payload = _helper_payload_from_instagram_profile_payload(
+                tagged_metadata,
+                {"items": []},
+                browser=browser,
+                thumbnail_fetcher=thumbnail_fetcher,
+                limit=limit,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            _annotate_profile_surface_media(
+                tagged_payload["media"],
+                scan_surface="tagged",
+                owner_username=username,
+            )
+            payload_media.extend(tagged_payload["media"])
+        except InstagramBrowserScanError as error:
+            _handle_profile_surface_error(scan_mode, "tagged", error, surface_errors)
+
+    if surface_errors and not metadata_by_surface:
+        raise InstagramBrowserScanError(_surface_errors_message(surface_errors))
 
     payload = {
         "helper_version": "lorasuite-instagram-web-api-v1",
         "media": _dedupe_media_items(payload_media),
     }
     result = scan_instagram_helper_payload(payload, vault_root)
-    result.metadata_json = _profile_pagination_metadata(metadata_by_surface, limit)
+    result.metadata_json = _profile_pagination_metadata(
+        metadata_by_surface,
+        limit,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    if surface_errors:
+        result.errors.extend(surface_errors)
+        result.metadata_json["failed_scan_surfaces"] = [
+            error["surface"] for error in surface_errors
+        ]
     return result
 
 
@@ -189,6 +248,30 @@ def _should_fetch_surface(
     if scan_mode != "all":
         return False
     return not is_continuation or surface in cursor_state
+
+
+def _handle_profile_surface_error(
+    scan_mode: InstagramScanMode,
+    surface: str,
+    error: InstagramBrowserScanError,
+    surface_errors: list[dict[str, str]],
+) -> None:
+    if scan_mode != "all":
+        raise error
+    surface_errors.append(
+        {
+            "code": "instagram_surface_error",
+            "surface": surface,
+            "message": str(error),
+        }
+    )
+
+
+def _surface_errors_message(surface_errors: list[dict[str, str]]) -> str:
+    details = "; ".join(
+        f"{error['surface']}: {error['message']}" for error in surface_errors
+    )
+    return f"Instagram scan failed for all requested surfaces: {details}"
 
 
 def _fetch_feed_surface(
@@ -240,15 +323,35 @@ def _helper_payload_from_ytdlp_metadata(
     *,
     browser: str,
     thumbnail_fetcher: ThumbnailFetcher,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
     media = [
         _media_item_from_ytdlp_entry(entry, browser, thumbnail_fetcher)
         for entry in _iter_entries(metadata)
+        if _entry_in_date_range(entry, date_from, date_to)
     ]
+    _annotate_profile_surface_media(media, scan_surface="direct", owner_username=None)
     return {
         "helper_version": "lorasuite-ytdlp-browser-v0",
         "media": [item for item in media if item is not None],
     }
+
+
+def _annotate_profile_surface_media(
+    media: list[dict[str, Any] | None],
+    *,
+    scan_surface: str,
+    owner_username: str | None,
+) -> None:
+    for item in media:
+        if item is None:
+            continue
+        item["scan_surface"] = scan_surface
+        if owner_username:
+            item["owner_username"] = owner_username
+        if not item.get("uploader_username") and owner_username and scan_surface != "tagged":
+            item["uploader_username"] = owner_username
 
 
 def _fetch_profile_with_browser_cookies(username: str, browser: str) -> dict[str, Any]:
@@ -422,10 +525,13 @@ def _helper_payload_from_instagram_clips_payload(
     *,
     browser: str,
     thumbnail_fetcher: ThumbnailFetcher,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
     media = [
         _media_item_from_instagram_clip(entry, browser, thumbnail_fetcher)
         for entry in _iter_instagram_clip_media(metadata)
+        if _entry_in_date_range(entry, date_from, date_to)
     ]
     return {
         "helper_version": "lorasuite-instagram-web-api-v0",
@@ -440,14 +546,26 @@ def _helper_payload_from_instagram_profile_payload(
     browser: str,
     thumbnail_fetcher: ThumbnailFetcher,
     limit: int = PROFILE_REELS_PAGE_SIZE,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
+    profile_entries = [
+        entry
+        for entry in _iter_instagram_profile_media(profile_metadata)
+        if _entry_in_date_range(entry, date_from, date_to)
+    ][:limit]
+    reel_entries = [
+        entry
+        for entry in _iter_instagram_clip_media(reels_metadata)
+        if _entry_in_date_range(entry, date_from, date_to)
+    ][:limit]
     profile_media = [
         _media_item_from_instagram_profile_node(entry, browser, thumbnail_fetcher)
-        for entry in _iter_instagram_profile_media(profile_metadata)[:limit]
+        for entry in profile_entries
     ]
     reel_media = [
         _media_item_from_instagram_clip(entry, browser, thumbnail_fetcher)
-        for entry in _iter_instagram_clip_media(reels_metadata)[:limit]
+        for entry in reel_entries
     ]
     return {
         "helper_version": "lorasuite-instagram-web-api-v0",
@@ -479,11 +597,17 @@ def _request_instagram_json(
         with opener.open(request, timeout=30) as response:
             raw_payload = response.read().decode("utf-8", errors="replace")
     except HTTPError as error:
-        raise InstagramBrowserScanError(
-            f"Instagram request failed with HTTP {error.code}."
+        raise error_from_http(
+            InstagramBrowserScanError,
+            "Instagram request failed",
+            error,
         ) from error
     except URLError as error:
-        raise InstagramBrowserScanError(f"Instagram request failed: {error.reason}.") from error
+        raise error_from_url(
+            InstagramBrowserScanError,
+            "Instagram request failed",
+            error,
+        ) from error
 
     try:
         payload = json.loads(raw_payload)
@@ -613,6 +737,8 @@ def _media_item_from_ytdlp_entry(
         "duration": _optional_float(entry.get("duration")),
         "browser_source": browser,
         "extractor": "yt-dlp",
+        **_entry_date_metadata(entry),
+        **_ytdlp_uploader_metadata(entry),
     }
     if media_type == "video":
         item.update(_instagram_audio_metadata(entry))
@@ -650,6 +776,8 @@ def _media_item_from_instagram_clip(
         "duration": duration,
         "browser_source": browser,
         "extractor": "instagram-web-api",
+        **_entry_date_metadata(entry),
+        **_instagram_uploader_metadata(entry),
     }
     if media_type == "video":
         item.update(_instagram_audio_metadata(entry))
@@ -695,6 +823,8 @@ def _media_item_from_instagram_profile_node(
         ),
         "browser_source": browser,
         "extractor": "instagram-web-api",
+        **_entry_date_metadata(entry),
+        **_instagram_uploader_metadata(entry),
     }
     if is_video:
         item.update(_instagram_audio_metadata(entry))
@@ -939,39 +1069,132 @@ def _instagram_profile_caption_text(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _instagram_uploader_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+    owner = _first_dict(entry.get("user"), entry.get("owner"))
+    if owner is None:
+        return {}
+
+    metadata = {
+        "uploader_username": _first_string(owner.get("username")),
+        "uploader_display_name": _first_string(owner.get("full_name"), owner.get("name")),
+        "uploader_id": _first_string(
+            str(owner.get("id")) if owner.get("id") is not None else None
+        ),
+    }
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _ytdlp_uploader_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "uploader_username": _first_string(
+            entry.get("channel"),
+            entry.get("uploader_id"),
+            entry.get("creator"),
+        ),
+        "uploader_display_name": _first_string(entry.get("uploader"), entry.get("creator")),
+        "uploader_id": _first_string(
+            str(entry.get("uploader_id"))
+            if entry.get("uploader_id") is not None
+            else None
+        ),
+    }
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
 def _dedupe_media_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    item_by_identifier: dict[str, dict[str, Any]] = {}
     for item in items:
-        identifiers = {
-            str(value).strip()
-            for value in (item.get("id"), item.get("source_url"))
-            if str(value or "").strip()
-        }
-        if identifiers and identifiers.intersection(seen):
+        identifiers = _instagram_media_identifiers(item)
+        existing = next(
+            (item_by_identifier[identifier] for identifier in identifiers if identifier in item_by_identifier),
+            None,
+        )
+        if existing is not None:
+            surfaces = _media_scan_surfaces(existing) | _media_scan_surfaces(item)
+            if surfaces:
+                existing["scan_surfaces"] = sorted(surfaces)
+            for identifier in identifiers:
+                item_by_identifier[identifier] = existing
             continue
-        seen.update(identifiers)
         deduped.append(item)
+        for identifier in identifiers:
+            item_by_identifier[identifier] = item
     return deduped
+
+
+def _instagram_media_identifiers(item: dict[str, Any]) -> set[str]:
+    identifiers: set[str] = set()
+    media_id = str(item.get("id") or "").strip()
+    if media_id:
+        identifiers.add(f"id:{media_id}")
+        base_id = media_id.split("_", maxsplit=1)[0]
+        if base_id.isdigit():
+            identifiers.add(f"numeric-id:{base_id}")
+
+    source_url = str(item.get("source_url") or "").strip()
+    if source_url:
+        parsed = urlparse(source_url)
+        normalized_url = f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
+        identifiers.add(f"url:{normalized_url}")
+        parts = [part for part in parsed.path.split("/") if part]
+        for index, part in enumerate(parts[:-1]):
+            if part.lower() in {"p", "reel", "tv"}:
+                identifiers.add(f"shortcode:{parts[index + 1].lower()}")
+                break
+    return identifiers
+
+
+def _media_scan_surfaces(item: dict[str, Any]) -> set[str]:
+    surfaces: set[str] = set()
+    surface = item.get("scan_surface")
+    if isinstance(surface, str) and surface:
+        surfaces.add(surface)
+    values = item.get("scan_surfaces")
+    if isinstance(values, (list, tuple, set)):
+        surfaces.update(str(value) for value in values if value)
+    return surfaces
 
 
 def _profile_pagination_metadata(
     metadata_by_surface: dict[str, dict[str, Any]],
     limit: int,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
     next_cursor_state = {
         surface: cursor
         for surface, metadata in metadata_by_surface.items()
         if (cursor := _next_profile_cursor(metadata)) is not None
+        and not _surface_crossed_date_from(metadata, date_from)
     }
     pagination: dict[str, Any] = {
         "batch_size": limit,
         "scan_surfaces": list(metadata_by_surface.keys()),
         "has_next_batch": bool(next_cursor_state),
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
     }
     if next_cursor_state:
         pagination["next_cursor"] = _encode_scan_cursor(next_cursor_state)
     return pagination
+
+
+def _surface_crossed_date_from(metadata: dict[str, Any], date_from: date | None) -> bool:
+    if date_from is None:
+        return False
+    timestamps = [
+        timestamp
+        for entry in (
+            _iter_instagram_profile_media(metadata) + _iter_instagram_clip_media(metadata)
+        )
+        if (timestamp := _entry_timestamp(entry)) is not None
+    ]
+    if not timestamps:
+        return False
+    oldest_date = datetime.fromtimestamp(min(timestamps), timezone.utc).date()
+    return oldest_date < date_from
 
 
 def _next_profile_cursor(metadata: dict[str, Any]) -> str | None:
@@ -1156,6 +1379,71 @@ def _validate_scan_limit(limit: int) -> int:
             f"Instagram scan limit must be between 1 and {MAX_PROFILE_REELS_PAGE_SIZE}."
         )
     return normalized
+
+
+def _validate_date_range(date_from: date | None, date_to: date | None) -> None:
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise InstagramBrowserScanError("Instagram start date must be on or before end date.")
+
+
+def _entry_in_date_range(
+    entry: dict[str, Any],
+    date_from: date | None,
+    date_to: date | None,
+) -> bool:
+    if date_from is None and date_to is None:
+        return True
+    timestamp = _entry_timestamp(entry)
+    if timestamp is None:
+        return False
+    posted_date = datetime.fromtimestamp(timestamp, timezone.utc).date()
+    if date_from is not None and posted_date < date_from:
+        return False
+    if date_to is not None and posted_date > date_to:
+        return False
+    return True
+
+
+def _entry_date_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+    timestamp = _entry_timestamp(entry)
+    if timestamp is None:
+        return {}
+    return {
+        "posted_timestamp": timestamp,
+        "posted_at": datetime.fromtimestamp(timestamp, timezone.utc).isoformat(),
+    }
+
+
+def _entry_timestamp(entry: dict[str, Any]) -> float | None:
+    for key in (
+        "taken_at",
+        "taken_at_timestamp",
+        "timestamp",
+        "release_timestamp",
+        "device_timestamp",
+    ):
+        raw_value = entry.get(key)
+        if isinstance(raw_value, bool) or raw_value is None:
+            continue
+        try:
+            timestamp = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        while timestamp > 4_102_444_800:
+            timestamp /= 1000.0
+        if timestamp > 0:
+            return timestamp
+
+    upload_date = entry.get("upload_date")
+    if isinstance(upload_date, str):
+        try:
+            parsed_date = datetime.strptime(upload_date, "%Y%m%d").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            return None
+        return parsed_date.timestamp()
+    return None
 
 
 def _fallback_media_id(source_url: str) -> str:
