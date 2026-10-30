@@ -26,6 +26,7 @@ git clone https://github.com/MichaelDanCurtis/LoraSuite.git
 cd LoraSuite
 npm ci
 python3 -m venv engine/.venv
+engine/.venv/bin/python -m pip install --upgrade 'pip>=26.2' 'setuptools>=84.1.0'
 engine/.venv/bin/python -m pip install -e 'engine[dev]'
 ```
 

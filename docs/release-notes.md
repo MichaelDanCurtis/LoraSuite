@@ -8,7 +8,7 @@ First public source release of LoraSuite, with the optional unpacked Chrome comp
 - Project-scoped work, provider handoffs and evaluation support are included.
 - LoRA Manager integration delegates to the external application.
 - Consistent navigation controls and a visual six-stage workflow.
-- Local browser-origin checks and updated frontend dependencies.
+- Local browser-origin checks and updated frontend and engine dependencies.
 
 ## Preview boundaries
 
