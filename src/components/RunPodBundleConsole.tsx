@@ -424,7 +424,7 @@ export function RunPodBundleConsole({
     try {
       const run = await engine.cancelRunPodTrainingRun(runId, apiToken.trim() || undefined);
       upsertRun(run);
-      setStatus(`RunPod job ${shortId(run.provider_job_id ?? run.id)} canceled.`);
+      setStatus(run.progress_message);
     } catch (error) {
       setStatus(`RunPod cancel error: ${errorMessage(error)}`);
     } finally {

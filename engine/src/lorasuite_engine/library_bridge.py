@@ -24,13 +24,13 @@ from pydantic import BaseModel, Field, field_validator
 from lorasuite_engine.curation import CurationService
 from lorasuite_engine.dataset_projects import CharacterProjectService
 from lorasuite_engine.h3_lora import SafeFile, adapter_pairs
+from lorasuite_engine.local_origins import is_local_ui_origin
 from lorasuite_engine.models import RequestedOutput
 from lorasuite_engine.safetensors_metadata import read_safetensors_metadata
 from lorasuite_engine.storage import atomic_write_json, json_file_lock
 from lorasuite_engine.vault import VaultService
 
 EXTENSION = re.compile(r"chrome-extension://[a-p]{32}$")
-LOCAL_UI = re.compile(r"http://(?:127\.0\.0\.1|localhost)(?::\d+)?$")
 
 
 def public_url(value: str) -> str:
@@ -400,7 +400,7 @@ def library_router(root: Path):
 
     def ui(request: Request):
         origin = request.headers.get("origin", "")
-        if origin and not (LOCAL_UI.fullmatch(origin) or origin == "tauri://localhost"):
+        if origin and not is_local_ui_origin(origin):
             raise HTTPException(403, "This operation is only available in the local LoraSuite UI")
 
     def extension(request: Request):

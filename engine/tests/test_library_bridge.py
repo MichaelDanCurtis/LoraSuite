@@ -228,3 +228,41 @@ def test_training_artifact_export_reuses_registry_hash_and_preserves_user_metada
         service.register_artifact(artifact.id)
     with pytest.raises(ValueError, match='Register and validate'):
         service.register_artifact('missing')
+
+
+@pytest.mark.parametrize('origin', [
+    'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost',
+    'http://localhost:5175', 'http://127.0.0.1:5173',
+])
+def test_library_ui_uses_engine_local_origins(tmp_path, monkeypatch, origin):
+    monkeypatch.setattr(LibraryBridge, 'manager', lambda self, **kwargs: {'roots': [], 'items': []})
+    monkeypatch.setattr(LibraryBridge, 'catalog', lambda *args: {'items': []})
+    with TestClient(create_app(vault_root=tmp_path)) as client:
+        headers = {'Origin': origin}
+        preflight = client.options('/library/pairing-code', headers={
+            **headers, 'Access-Control-Request-Method': 'POST',
+        })
+        assert preflight.status_code == 200
+        assert preflight.headers['access-control-allow-origin'] == origin
+        for path in ['/library/status', '/library/models']:
+            result = client.get(path, headers=headers)
+            assert result.status_code == 200
+            assert result.headers['access-control-allow-origin'] == origin
+        assert client.post('/library/pairing-code', json={}, headers=headers).status_code == 200
+        # Reaches the export handler, which rejects this nonexistent artifact.
+        assert client.post('/library/training-artifacts/missing', json={}, headers=headers).status_code == 400
+
+
+@pytest.mark.parametrize('origin', [
+    'https://evil.example', 'http://tauri.localhost.evil.example',
+    'https://tauri.localhost:444', 'http://other.localhost',
+    'tauri://localhost.evil.example', 'null', ORIGIN,
+])
+def test_library_admin_rejects_non_ui_origins_before_mutation(tmp_path, origin):
+    with TestClient(create_app(vault_root=tmp_path)) as client:
+        headers = {'Origin': origin}
+        assert client.post('/library/pairing-code', json={}, headers=headers).status_code == 403
+        assert client.post('/library/config', json={'port': 9000}, headers=headers).status_code == 403
+        assert client.get('/library/models', headers=headers).status_code == 403
+        assert not LibraryBridge(tmp_path).auth.exists()
+        assert LibraryBridge(tmp_path).read()['port'] == 8188
