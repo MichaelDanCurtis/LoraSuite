@@ -26,12 +26,16 @@ jobs:
         run: |
           npm ci
           python -m venv engine/.venv
+          engine/.venv/bin/python -m pip install --upgrade 'pip>=26.2' 'setuptools>=84.1.0'
           engine/.venv/bin/python -m pip install -e 'engine[dev]'
+          python -m pip install pip-audit
       - name: Test and build
         run: |
           npm test
           npm run engine:test
           npm run build
           npm audit --audit-level=moderate
+      - name: Audit engine dependencies
+        run: pip-audit --path "$(engine/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
       - name: Validate release contents
         run: python scripts/package_public_release.py
