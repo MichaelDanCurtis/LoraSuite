@@ -22,6 +22,48 @@ function bootstrapEngineMethods() {
 describe("RunPodBundleConsole", () => {
   beforeEach(() => isTauriMock.mockReturnValue(false));
 
+
+  it.each([
+    ["running", "Cancellation requested; waiting for RunPod confirmation"],
+    ["in_queue", "RunPod cancellation not confirmed; refresh or cancel to retry"],
+    ["completed", "Training completed with 1 artifact(s)"],
+    ["canceled", "RunPod training canceled"],
+  ] as const)("reports the provider cancellation outcome when the job is %s", async (status, message) => {
+    const user = userEvent.setup();
+    const result: RunPodTrainingRun = { ...runpodRun(), status, progress_message: message };
+    const engine = {
+      createRunPodBundle: vi.fn(),
+      listRunPodBundles: vi.fn().mockResolvedValue([{ ...bundle(), available: true }]),
+      listRunPodInfrastructureProfiles: vi.fn().mockResolvedValue([]),
+      provisionRunPodInfrastructure: vi.fn(),
+      ...bootstrapEngineMethods(),
+      listRunPodBundleUploadJobs: vi.fn().mockResolvedValue([completedUpload()]),
+      getRunPodBundleUploadJob: vi.fn(),
+      createRunPodBundleUploadJob: vi.fn(),
+      resumeRunPodBundleUploadJob: vi.fn(),
+      listRunPodPreflightReports: vi.fn().mockResolvedValue([]),
+      createRunPodPreflightReport: vi.fn().mockResolvedValue(preflightReport()),
+      listRunPodTrainingRuns: vi.fn().mockResolvedValue([runpodRun()]),
+      getRunPodTrainingRun: vi.fn(),
+      createRunPodTrainingRun: vi.fn().mockResolvedValue(runpodRun()),
+      refreshRunPodTrainingRun: vi.fn(),
+      cancelRunPodTrainingRun: vi.fn().mockResolvedValue(result),
+      downloadRunPodTrainingArtifacts: vi.fn(),
+      registerRunPodTrainingArtifacts: vi.fn(),
+    };
+    const { container } = render(<RunPodBundleConsole engine={engine} sourceExportPath="/tmp/image-export" modality="image" triggerToken="person_token" fingerprint="abcdef" trainingTargetProfileId="runcomfy_flux1_dev_character" />);
+    await user.click(await screen.findByRole("button", { name: "Cancel RunPod job" }));
+    await waitFor(() => expect(container.querySelector(".runpod-console > .status-line")).toHaveTextContent(message));
+    expect(engine.cancelRunPodTrainingRun).toHaveBeenCalledWith("runpod-run-1", undefined);
+    expect(container.querySelector(".runpod-console > .status-line")).not.toHaveTextContent("RunPod job job-1 canceled.");
+    if (status === "running" || status === "in_queue") {
+      expect(screen.getByRole("button", { name: "Cancel RunPod job" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Refresh RunPod job" })).toBeEnabled();
+    } else {
+      expect(screen.queryByRole("button", { name: "Cancel RunPod job" })).not.toBeInTheDocument();
+    }
+  });
+
   it("creates a network-volume-ready modality bundle", async () => {
     const user = userEvent.setup();
     const createRunPodBundle = vi.fn().mockResolvedValue(bundle());
